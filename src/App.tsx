@@ -22,7 +22,7 @@ import {
   computeMetricDeltas,
   computePairwiseRelationships,
 } from './lib/analytics'
-import { importOuraFile, loadDashboardRecords, probeHealth, sendChat, syncOuraData } from './lib/api'
+import { importOuraFile, loadDashboardRecords, probeHealth, sendChat, startOuraOAuth, syncOuraData, type OuraAuthStatus } from './lib/api'
 import type { ChatMessage } from './lib/api'
 import { buildOverlayChartData } from './lib/chart'
 
@@ -50,6 +50,7 @@ function App() {
   const [apiMode, setApiMode] = useState<'api' | 'demo'>('demo')
   const [syncStatus, setSyncStatus] = useState('Connecting to local API...')
   const [records, setRecords] = useState(() => sliceWindow(30))
+  const [ouraAuth, setOuraAuth] = useState<OuraAuthStatus | undefined>()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
@@ -61,11 +62,30 @@ function App() {
       }
 
       setApiMode(result.mode)
+      setOuraAuth(result.ouraAuth)
+
+      const authResult = new URLSearchParams(window.location.search).get('oura')
+      const authReason = new URLSearchParams(window.location.search).get('reason')
+      if (authResult === 'connected') {
+        setSyncStatus('Oura account connected locally. You can sync your ring data now.')
+        window.history.replaceState({}, '', window.location.pathname)
+        return
+      }
+      if (authResult === 'error') {
+        setSyncStatus(`Oura connection failed: ${authReason ?? 'unknown error'}`)
+        window.history.replaceState({}, '', window.location.pathname)
+        return
+      }
+
       setSyncStatus(
         result.connected
           ? result.documentCount > 0
             ? 'Local API reachable. Stored Oura data is ready for the dashboard.'
-            : 'Local API reachable. Seeding demo data until you sync or import your own history.'
+            : result.ouraAuth?.connected || result.ouraAuth?.hasPersonalAccessToken
+              ? 'Local API reachable. Connect complete; sync when you are ready.'
+              : result.ouraAuth?.hasClientCredentials
+                ? 'Local API reachable. Connect your Oura account to enable live sync.'
+                : 'Local API reachable. Seeding demo data until you sync or import your own history.'
           : 'Local API unavailable. The dashboard is running on demo data.',
       )
     })
@@ -273,6 +293,8 @@ function App() {
           <SyncControls
             onSync={handleSync}
             onImportClick={handleImportClick}
+            onConnectOura={startOuraOAuth}
+            showConnectOura={Boolean(!ouraAuth?.connected && !ouraAuth?.hasPersonalAccessToken && ouraAuth?.hasClientCredentials)}
             apiMode={apiMode}
             statusText={syncStatus}
             busy={isBusy}

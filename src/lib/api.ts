@@ -34,6 +34,14 @@ export interface ChatResponse {
   mode: 'api' | 'demo'
 }
 
+export interface OuraAuthStatus {
+  hasPersonalAccessToken: boolean
+  hasClientCredentials: boolean
+  connected: boolean
+  expiresAt?: string
+  scope?: string
+}
+
 async function readJsonResponse(response: Response) {
   const payload = (await response.json().catch(() => null)) as ApiErrorPayload | null
 
@@ -209,20 +217,30 @@ export async function importOuraFile(file: File) {
 export async function probeHealth() {
   try {
     const response = await fetch('/api/health')
-    const payload = (await response.json().catch(() => null)) as { ok?: boolean; store?: { documentCount?: number } } | null
+    const payload = (await response.json().catch(() => null)) as {
+      ok?: boolean
+      store?: { documentCount?: number }
+      auth?: { oura?: OuraAuthStatus }
+    } | null
 
     return {
       connected: response.ok && Boolean(payload?.ok ?? true),
       mode: response.ok ? ('api' as const) : ('demo' as const),
       documentCount: payload?.store?.documentCount ?? 0,
+      ouraAuth: payload?.auth?.oura,
     }
   } catch {
     return {
       connected: false,
       mode: 'demo' as const,
       documentCount: 0,
+      ouraAuth: undefined,
     }
   }
+}
+
+export function startOuraOAuth() {
+  window.location.href = '/api/auth/oura/start'
 }
 
 interface ChartPoint {

@@ -1,8 +1,10 @@
-import { FileDown, RefreshCw, ShieldCheck } from 'lucide-react'
+import { FileDown, Link2, RefreshCw, ShieldCheck } from 'lucide-react'
 
 interface SyncControlsProps {
   onSync: () => void
   onImportClick: () => void
+  onConnectOura?: () => void
+  showConnectOura?: boolean
   apiMode: 'api' | 'demo'
   statusText: string
   busy?: boolean
@@ -11,6 +13,8 @@ interface SyncControlsProps {
 export function SyncControls({
   onSync,
   onImportClick,
+  onConnectOura,
+  showConnectOura,
   apiMode,
   statusText,
   busy,
@@ -26,6 +30,12 @@ export function SyncControls({
       </div>
 
       <div className="sync-controls__actions">
+        {showConnectOura ? (
+          <button type="button" className="secondary-button" onClick={onConnectOura} disabled={busy}>
+            <Link2 size={15} />
+            Connect Oura
+          </button>
+        ) : null}
         <button type="button" className="secondary-button" onClick={onImportClick} disabled={busy}>
           <FileDown size={15} />
           Import export
@@ -38,4 +48,3 @@ export function SyncControls({
     </div>
   )
 }
-

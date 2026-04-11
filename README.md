@@ -17,7 +17,7 @@ Prerequisites:
 
 - Node.js 20 or newer
 - npm
-- an Oura personal access token if you want live sync
+- either an Oura personal access token or Oura OAuth client credentials if you want live sync
 - an OpenAI API key if you want AI chat enabled
 
 Install and run:
@@ -35,11 +35,23 @@ Create a local `.env` file from `.env.example` and fill in:
 
 - `OPENAI_API_KEY` for AI chat
 - `OPENAI_MODEL` for the model name to use, defaulting to `gpt-5`
-- `OURA_PERSONAL_ACCESS_TOKEN` for Oura API access and sync
+- `OURA_PERSONAL_ACCESS_TOKEN` for direct Oura API access and sync
+- `OURA_CLIENT_ID` and `OURA_CLIENT_SECRET` for the local OAuth connect flow
+- `OURA_REDIRECT_URI` for the local Oura OAuth callback, defaulting to `http://localhost:8787/api/auth/oura/callback`
+- `FRONTEND_URL` for the local frontend redirect target after Oura OAuth, defaulting to `http://localhost:5173`
 - `PORT` for the local API server, defaulting to `8787`
 
 If `OPENAI_API_KEY` is missing, AI chat should be treated as unavailable.
-If `OURA_PERSONAL_ACCESS_TOKEN` is missing, the app should fall back to demo or locally cached data instead of live sync.
+If both `OURA_PERSONAL_ACCESS_TOKEN` and the OAuth credential set are missing, the app falls back to demo or locally cached data instead of live sync.
+
+## Oura Auth
+
+Two local auth paths are supported:
+
+- personal access token via `OURA_PERSONAL_ACCESS_TOKEN`
+- OAuth connect via `OURA_CLIENT_ID` and `OURA_CLIENT_SECRET`
+
+If you configure the OAuth credentials, the UI exposes a `Connect Oura` action that sends you through Oura authorization and stores the resulting access token only in local ignored files under `server/data/`.
 
 ## Demo Mode
 
