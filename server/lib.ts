@@ -207,6 +207,15 @@ export interface HealthResponse {
     syncRunCount: number
     demoSeededAt?: string
   }
+  auth?: {
+    oura: {
+      hasPersonalAccessToken: boolean
+      hasClientCredentials: boolean
+      connected: boolean
+      expiresAt?: string
+      scope?: string
+    }
+  }
 }
 
 export interface ChatContext {

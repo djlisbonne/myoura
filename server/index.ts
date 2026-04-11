@@ -4,6 +4,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import path from 'path'
 
 import { buildChartResponse, buildOverviewResponse, buildSourceGroups } from './analytics.js'
+import { buildAuthorizationUrl, callbackRedirect, completeOauthCallback, getOauthStatus, resolveOuraAccessToken } from './auth.js'
 import {
   DEFAULT_LOOKBACK_DAYS,
   chartableMetricDefinitions,
@@ -80,6 +81,7 @@ function readResourceIds(body: Record<string, unknown>): ResourceId[] | undefine
 
 app.get('/api/health', async (_req, res) => {
   const state = await store.read()
+  const oauth = await getOauthStatus()
   const payload: HealthResponse = {
     ok: true,
     version: state.version,
@@ -91,8 +93,56 @@ app.get('/api/health', async (_req, res) => {
       syncRunCount: state.syncRuns.length,
       ...(state.demoSeededAt ? { demoSeededAt: state.demoSeededAt } : {}),
     },
+    auth: {
+      oura: {
+        hasPersonalAccessToken: Boolean(process.env.OURA_PERSONAL_ACCESS_TOKEN),
+        ...oauth,
+      },
+    },
   }
   res.json(payload)
+})
+
+app.get('/api/auth/oura/status', async (_req, res) => {
+  const oauth = await getOauthStatus()
+  res.json({
+    ok: true,
+    oura: {
+      hasPersonalAccessToken: Boolean(process.env.OURA_PERSONAL_ACCESS_TOKEN),
+      ...oauth,
+    },
+  })
+})
+
+app.get('/api/auth/oura/start', async (_req, res, next) => {
+  try {
+    const url = await buildAuthorizationUrl()
+    res.redirect(url)
+  } catch (error) {
+    next(error)
+  }
+})
+
+app.get('/api/auth/oura/callback', async (req, res) => {
+  const code = typeof req.query.code === 'string' ? req.query.code : null
+  const state = typeof req.query.state === 'string' ? req.query.state : undefined
+  const denied = typeof req.query.error === 'string' ? req.query.error : null
+
+  if (denied) {
+    return res.redirect(callbackRedirect(false, denied))
+  }
+
+  if (!code) {
+    return res.redirect(callbackRedirect(false, 'missing_code'))
+  }
+
+  try {
+    await completeOauthCallback(code, state)
+    return res.redirect(callbackRedirect(true))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'oauth_callback_failed'
+    return res.redirect(callbackRedirect(false, message))
+  }
 })
 
 app.get('/api/sources', async (req, res) => {
@@ -153,11 +203,6 @@ app.post('/api/demo', async (req, res) => {
 
 app.post('/api/sync', async (req, res) => {
   const body = typeof req.body === 'object' && req.body !== null ? (req.body as Record<string, unknown>) : {}
-  const apiToken = process.env.OURA_PERSONAL_ACCESS_TOKEN
-  if (!apiToken) {
-    return sendError(res, 503, 'OURA_TOKEN_MISSING', 'OURA_PERSONAL_ACCESS_TOKEN is not configured.')
-  }
-
   const resourceIds = resourceIdsForSync(readResourceIds(body))
 
   const range = resolveDateRange({
@@ -171,7 +216,8 @@ app.post('/api/sync', async (req, res) => {
           : DEFAULT_LOOKBACK_DAYS,
   })
   const replace = parseBoolean(body.replace, false)
-  const client = new OuraClient(apiToken)
+  const auth = await resolveOuraAccessToken()
+  const client = new OuraClient(auth.accessToken)
   const syncResult = await client.sync(range, resourceIds)
   const lookbackDays = typeof body.lookbackDays === 'number' ? body.lookbackDays : typeof body.lookbackDays === 'string' ? Number(body.lookbackDays) : undefined
   const syncRun = buildSyncRun(
@@ -190,6 +236,7 @@ app.post('/api/sync', async (req, res) => {
   res.json({
     ok: true,
     mode: replace ? 'replace' : 'merge',
+    authMode: auth.authMode,
     summary,
     resources: syncResult.resources,
     warnings: syncResult.warnings,
@@ -267,6 +314,15 @@ app.use((error: unknown, _req: Request, res: Response, next: NextFunction) => {
     const message = error.message
     if (message.includes('OPENAI_API_KEY is not configured')) {
       return sendError(res, 503, 'OPENAI_KEY_MISSING', message)
+    }
+    if (
+      message.includes('OURA_CLIENT_ID') ||
+      message.includes('No Oura access token is configured') ||
+      message.includes('Failed to exchange Oura OAuth token') ||
+      message.includes('Stored Oura OAuth token has expired') ||
+      message.includes('Invalid Oura OAuth state')
+    ) {
+      return sendError(res, 503, 'OURA_AUTH_ERROR', message)
     }
     if (message.includes('validation')) {
       return sendError(res, 400, 'INVALID_REQUEST', message)
