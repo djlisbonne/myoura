@@ -8,7 +8,6 @@ import { SyncControls } from './components/SyncControls'
 import {
   buildMetricCatalog,
   defaultSelectedMetricIds,
-  formatMetricValue,
   metricPresets,
   rangeOptions,
   type MetricDefinition,
@@ -130,7 +129,9 @@ function App() {
       }
 
       if (result.ouraAuth?.hasClientCredentials) {
-        setSyncStatus('Local API reachable. OAuth app is configured, but no user token is stored yet.')
+        setSyncStatus(
+          `Local API reachable. OAuth app is configured, but no user token is stored yet. Current redirect URI: ${result.ouraAuth.redirectUri ?? 'unset'}.`,
+        )
         return
       }
 
@@ -244,18 +245,6 @@ function App() {
     }
   }, [availableMetricIds, selectedWindow])
 
-  const filteredMetrics = useMemo(() => {
-    const query = metricQuery.trim().toLowerCase()
-    if (!query) {
-      return chartableMetrics
-    }
-
-    return chartableMetrics.filter((metric) =>
-      [metric.label, metric.category, metric.metricId, metric.resourceLabel, metric.unit ?? '', metric.description]
-        .some((value) => value.toLowerCase().includes(query)),
-    )
-  }, [chartableMetrics, metricQuery])
-
   const visibleSeries = useMemo(
     () => mainSeries.filter((entry) => selectedMetricIds.includes(entry.metricId) && metricAxisMap[entry.metricId] !== 'off'),
     [mainSeries, metricAxisMap, selectedMetricIds],
@@ -352,21 +341,6 @@ function App() {
   const latestRelationship = relationships[0]
   const leftCount = visibleMetricIds.filter((metricId) => metricAxisMap[metricId] === 'left').length
   const rightCount = visibleMetricIds.filter((metricId) => metricAxisMap[metricId] === 'right').length
-  const latestMetrics = visibleSeries
-    .slice(0, 4)
-    .map((entry) => {
-      const metric = metricMap.get(entry.metricId)
-      const latestPoint = [...entry.points].reverse().find((point) => point.value !== null || point.textValue)
-      if (!metric || !latestPoint) {
-        return null
-      }
-      return {
-        metricId: entry.metricId,
-        label: metric.label,
-        value: formatMetricValue(metric, latestPoint.value, latestPoint.textValue),
-      }
-    })
-    .filter((entry): entry is { metricId: string; label: string; value: string } => Boolean(entry))
 
   return (
     <div className="app-shell">
@@ -451,7 +425,7 @@ function App() {
           </section>
 
           <MetricBrowser
-            metrics={filteredMetrics}
+            metrics={chartableMetrics}
             selectedMetricIds={visibleMetricIds}
             axisByMetric={metricAxisMap}
             presets={presets}
@@ -476,17 +450,6 @@ function App() {
               <span>{displayMode}</span>
             </div>
           </div>
-
-          {latestMetrics.length > 0 ? (
-            <div className="metric-browser__selected-list">
-              {latestMetrics.map((metric) => (
-                <span key={metric.metricId} className="metric-pill metric-pill--active">
-                  <strong>{metric.label}</strong>
-                  <span>{metric.value}</span>
-                </span>
-              ))}
-            </div>
-          ) : null}
 
           <OverlayChart
             series={visibleSeries}

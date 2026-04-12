@@ -27,6 +27,7 @@ export function MetricBrowser({
   onPresetChange,
   busy,
 }: MetricBrowserProps) {
+  const normalizedQuery = query.trim().toLowerCase()
   const grouped = metrics.reduce<Record<string, MetricDefinition[]>>((accumulator, metric) => {
     const bucket = accumulator[metric.resourceLabel] ?? []
     bucket.push(metric)
@@ -97,47 +98,62 @@ export function MetricBrowser({
       </div>
 
       <div className="metric-browser__groups">
-        {resourceLabels.map((resourceLabel) => (
-          <details key={resourceLabel} className="metric-group" open={query.trim().length > 0}>
-            <summary className="metric-group__summary">
-              <div>
-                <strong>{resourceLabel}</strong>
-                <span>{grouped[resourceLabel].length} metrics</span>
-              </div>
-              <span className="metric-group__summary-note">Browse</span>
-            </summary>
-            <div className="metric-group__metrics">
-              {grouped[resourceLabel].map((metric) => (
-                <article className="metric-row" key={metric.metricId}>
-                  <div className="metric-row__meta">
-                    <span className="metric-dot" style={{ backgroundColor: metric.color }} />
-                    <div>
-                      <div className="metric-row__topline">
-                        <strong>{metric.label}</strong>
-                        <span>{metric.unit ?? metric.category}</span>
+        {resourceLabels.map((resourceLabel) => {
+          const visibleMetrics = grouped[resourceLabel].filter((metric) => {
+            if (!normalizedQuery) {
+              return true
+            }
+
+            return [metric.label, metric.category, metric.metricId, metric.resourceLabel, metric.unit ?? '', metric.description]
+              .some((value) => value.toLowerCase().includes(normalizedQuery))
+          })
+
+          return (
+            <details key={resourceLabel} className="metric-group">
+              <summary className="metric-group__summary">
+                <div>
+                  <strong>{resourceLabel}</strong>
+                  <span>{visibleMetrics.length} shown</span>
+                </div>
+                <span className="metric-group__summary-note">Browse</span>
+              </summary>
+              <div className="metric-group__metrics">
+                {visibleMetrics.length > 0 ? (
+                  visibleMetrics.map((metric) => (
+                    <article className="metric-row" key={metric.metricId}>
+                      <div className="metric-row__meta">
+                        <span className="metric-dot" style={{ backgroundColor: metric.color }} />
+                        <div>
+                          <div className="metric-row__topline">
+                            <strong>{metric.label}</strong>
+                            <span>{metric.unit ?? metric.category}</span>
+                          </div>
+                          <p>{metric.description}</p>
+                          <small>{metric.metricId}</small>
+                        </div>
                       </div>
-                      <p>{metric.description}</p>
-                      <small>{metric.metricId}</small>
-                    </div>
-                  </div>
-                  <div className="metric-axis-picker">
-                    {(['off', 'left', 'right'] as const).map((side) => (
-                      <button
-                        key={side}
-                        type="button"
-                        className={`axis-chip ${axisByMetric[metric.metricId] === side ? 'axis-chip--active' : ''}`}
-                        onClick={() => onAxisChange(metric.metricId, side)}
-                        disabled={busy}
-                      >
-                        {side === 'off' ? 'Off' : side === 'left' ? 'Left' : 'Right'}
-                      </button>
-                    ))}
-                  </div>
-                </article>
-              ))}
-            </div>
-          </details>
-        ))}
+                      <div className="metric-axis-picker">
+                        {(['off', 'left', 'right'] as const).map((side) => (
+                          <button
+                            key={side}
+                            type="button"
+                            className={`axis-chip ${axisByMetric[metric.metricId] === side ? 'axis-chip--active' : ''}`}
+                            onClick={() => onAxisChange(metric.metricId, side)}
+                            disabled={busy}
+                          >
+                            {side === 'off' ? 'Off' : side === 'left' ? 'Left' : 'Right'}
+                          </button>
+                        ))}
+                      </div>
+                    </article>
+                  ))
+                ) : (
+                  <div className="metric-group__empty">No matching metrics in this resource.</div>
+                )}
+              </div>
+            </details>
+          )
+        })}
       </div>
     </section>
   )
