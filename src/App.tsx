@@ -263,6 +263,7 @@ function App() {
   const leftCount = visibleMetricIds.filter((metricId) => metricAxisMap[metricId] === 'left').length
   const rightCount = visibleMetricIds.filter((metricId) => metricAxisMap[metricId] === 'right').length
   const latestRelationship = relationships[0]
+  const canSyncOura = Boolean(ouraAuth?.connected || ouraAuth?.hasPersonalAccessToken)
 
   return (
     <div className="app-shell">
@@ -289,8 +290,13 @@ function App() {
           onImportClick={handleImportClick}
           onConnectOura={startOuraOAuth}
           showConnectOura={Boolean(!ouraAuth?.connected && !ouraAuth?.hasPersonalAccessToken && ouraAuth?.hasClientCredentials)}
+          syncDisabled={!canSyncOura}
           apiMode={apiMode}
-          statusText={syncStatus}
+          statusText={
+            !canSyncOura && ouraAuth?.hasClientCredentials
+              ? 'Client ID and secret are configured, but Oura still requires a user access token before sync can run.'
+              : syncStatus
+          }
           busy={isBusy}
         />
       </header>

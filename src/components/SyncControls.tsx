@@ -5,6 +5,7 @@ interface SyncControlsProps {
   onImportClick: () => void
   onConnectOura?: () => void
   showConnectOura?: boolean
+  syncDisabled?: boolean
   apiMode: 'api' | 'demo'
   statusText: string
   busy?: boolean
@@ -15,6 +16,7 @@ export function SyncControls({
   onImportClick,
   onConnectOura,
   showConnectOura,
+  syncDisabled,
   apiMode,
   statusText,
   busy,
@@ -33,14 +35,14 @@ export function SyncControls({
         {showConnectOura ? (
           <button type="button" className="secondary-button" onClick={onConnectOura} disabled={busy}>
             <Link2 size={15} />
-            Connect Oura
+            Authorize Oura
           </button>
         ) : null}
         <button type="button" className="secondary-button" onClick={onImportClick} disabled={busy}>
           <FileDown size={15} />
           Import export
         </button>
-        <button type="button" className="primary-button" onClick={onSync} disabled={busy}>
+        <button type="button" className="primary-button" onClick={onSync} disabled={busy || syncDisabled}>
           <RefreshCw size={15} />
           Sync now
         </button>
