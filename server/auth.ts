@@ -29,6 +29,8 @@ interface TokenResponse {
   scope?: string
 }
 
+export type OuraAuthResponseType = 'code' | 'token'
+
 const authDir = path.resolve(process.cwd(), 'server/data')
 const tokenPath = path.resolve(authDir, 'oura-oauth-token.json')
 const statePath = path.resolve(authDir, 'oura-oauth-state.json')
@@ -77,6 +79,10 @@ function frontendUrl() {
 
 function authScopes() {
   return process.env.OURA_OAUTH_SCOPES?.trim() || DEFAULT_SCOPES.join(' ')
+}
+
+function authResponseType(): OuraAuthResponseType {
+  return process.env.OURA_AUTH_RESPONSE_TYPE === 'token' ? 'token' : 'code'
 }
 
 function expiresAtFromNow(expiresInSeconds?: number) {
@@ -140,7 +146,7 @@ export async function buildAuthorizationUrl() {
   await writeJsonAtomically(statePath, { state, createdAt } satisfies PendingOAuthState)
 
   const url = new URL(OURA_AUTHORIZE_URL)
-  url.searchParams.set('response_type', 'code')
+  url.searchParams.set('response_type', authResponseType())
   url.searchParams.set('client_id', clientId)
   url.searchParams.set('redirect_uri', redirectUri())
   url.searchParams.set('scope', authScopes())
@@ -183,7 +189,27 @@ export async function getOauthStatus() {
     connected: Boolean(token?.accessToken),
     expiresAt: token?.expiresAt,
     scope: token?.scope,
+    responseType: authResponseType(),
+    redirectUri: redirectUri(),
   }
+}
+
+export async function storeDirectAccessToken(input: {
+  accessToken: string
+  tokenType?: string
+  expiresIn?: number
+  scope?: string
+}) {
+  const token: StoredOAuthToken = {
+    accessToken: input.accessToken,
+    tokenType: input.tokenType ?? 'bearer',
+    expiresAt: expiresAtFromNow(input.expiresIn),
+    scope: input.scope,
+    connectedAt: new Date().toISOString(),
+  }
+
+  await writeStoredToken(token)
+  return token
 }
 
 export async function resolveOuraAccessToken() {

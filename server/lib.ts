@@ -214,6 +214,8 @@ export interface HealthResponse {
       connected: boolean
       expiresAt?: string
       scope?: string
+      responseType?: 'code' | 'token'
+      redirectUri?: string
     }
   }
 }

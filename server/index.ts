@@ -4,7 +4,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import path from 'path'
 
 import { buildChartResponse, buildOverviewResponse, buildSourceGroups } from './analytics.js'
-import { buildAuthorizationUrl, callbackRedirect, completeOauthCallback, getOauthStatus, resolveOuraAccessToken } from './auth.js'
+import { buildAuthorizationUrl, callbackRedirect, completeOauthCallback, getOauthStatus, resolveOuraAccessToken, storeDirectAccessToken } from './auth.js'
 import {
   DEFAULT_LOOKBACK_DAYS,
   chartableMetricDefinitions,
@@ -143,6 +143,37 @@ app.get('/api/auth/oura/callback', async (req, res) => {
     const message = error instanceof Error ? error.message : 'oauth_callback_failed'
     return res.redirect(callbackRedirect(false, message))
   }
+})
+
+app.post('/api/auth/oura/token', async (req, res) => {
+  const body = typeof req.body === 'object' && req.body !== null ? (req.body as Record<string, unknown>) : {}
+  const accessToken = typeof body.accessToken === 'string' ? body.accessToken : null
+  const tokenType = typeof body.tokenType === 'string' ? body.tokenType : undefined
+  const expiresIn =
+    typeof body.expiresIn === 'number'
+      ? body.expiresIn
+      : typeof body.expiresIn === 'string'
+        ? Number(body.expiresIn)
+        : undefined
+  const scope = typeof body.scope === 'string' ? body.scope : undefined
+
+  if (!accessToken) {
+    return sendError(res, 400, 'OURA_TOKEN_MISSING', 'Direct token auth requires an access token.')
+  }
+
+  const stored = await storeDirectAccessToken({
+    accessToken,
+    tokenType,
+    expiresIn: Number.isFinite(expiresIn ?? Number.NaN) ? expiresIn : undefined,
+    scope,
+  })
+
+  res.status(201).json({
+    ok: true,
+    connected: true,
+    expiresAt: stored.expiresAt,
+    scope: stored.scope,
+  })
 })
 
 app.get('/api/sources', async (req, res) => {

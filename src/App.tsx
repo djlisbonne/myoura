@@ -17,6 +17,7 @@ import {
 } from './lib/analytics'
 import {
   importOuraFile,
+  completeOuraTokenAuthFromHash,
   loadDashboardRecords,
   probeHealth,
   sendChat,
@@ -74,7 +75,9 @@ function App() {
   useEffect(() => {
     let active = true
 
-    void probeHealth().then((result) => {
+    void (async () => {
+      const tokenAuthResult = await completeOuraTokenAuthFromHash()
+      const result = await probeHealth()
       if (!active) {
         return
       }
@@ -85,6 +88,10 @@ function App() {
       const params = new URLSearchParams(window.location.search)
       const authResult = params.get('oura')
       const authReason = params.get('reason')
+      if (tokenAuthResult?.connected) {
+        setSyncStatus('Oura access token captured locally. Sync is now available.')
+        return
+      }
       if (authResult === 'connected') {
         setSyncStatus('Oura account connected locally. Sync whenever you want to pull fresh data.')
         window.history.replaceState({}, '', window.location.pathname)
@@ -107,7 +114,7 @@ function App() {
                 : 'Local API reachable. Running on demo data until you connect or import.'
           : 'Local API unavailable. The app is running on demo data.',
       )
-    })
+    })()
 
     return () => {
       active = false

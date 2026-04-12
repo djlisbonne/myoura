@@ -40,6 +40,8 @@ export interface OuraAuthStatus {
   connected: boolean
   expiresAt?: string
   scope?: string
+  responseType?: 'code' | 'token'
+  redirectUri?: string
 }
 
 async function readJsonResponse(response: Response) {
@@ -241,6 +243,41 @@ export async function probeHealth() {
 
 export function startOuraOAuth() {
   window.location.href = '/api/auth/oura/start'
+}
+
+export async function completeOuraTokenAuthFromHash() {
+  const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash
+  if (!hash) {
+    return null
+  }
+
+  const params = new URLSearchParams(hash)
+  const accessToken = params.get('access_token')
+  if (!accessToken) {
+    return null
+  }
+
+  const tokenType = params.get('token_type') ?? undefined
+  const expiresInValue = params.get('expires_in')
+  const expiresIn = expiresInValue ? Number(expiresInValue) : undefined
+  const scope = params.get('scope') ?? undefined
+
+  const response = await requestJson<{ connected?: boolean }>('/api/auth/oura/token', {
+    method: 'POST',
+    body: JSON.stringify({
+      accessToken,
+      tokenType,
+      expiresIn,
+      scope,
+    }),
+  })
+
+  if (response?.ok) {
+    window.history.replaceState({}, '', window.location.pathname)
+    return { connected: true }
+  }
+
+  return null
 }
 
 interface ChartPoint {
