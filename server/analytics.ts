@@ -5,7 +5,7 @@ import {
   chartPointComparator,
   chooseLatestTimestamp,
   ensureMetricIds,
-  metricDefinitions,
+  inferChartableMetricIds,
   metricDefinitionsById,
   metricGroupsByResource,
   normalizeDateString,
@@ -192,6 +192,9 @@ function buildRelationships(documents: StoredDocument[]): RelationshipView[] {
     ['daily_activity.score', 'daily_activity.steps'],
     ['daily_readiness.score', 'daily_spo2.average'],
     ['daily_sleep.score', 'sleep.total_sleep_duration'],
+    ['daily_sleep.score', 'sleep.bedtime_start_minutes'],
+    ['daily_sleep.score', 'sleep_time.optimal_bedtime.start_offset_minutes'],
+    ['session.duration_minutes', 'sleep.total_sleep_duration'],
   ]
 
   const relationships: RelationshipView[] = []
@@ -239,7 +242,7 @@ export function buildChartResponse(state: StoreState, metricIds: string[], range
   emptyState?: string
 } {
   const documents = documentsInRange(state, range)
-  const selectedMetricIds = ensureMetricIds(metricIds.length > 0 ? metricIds : metricDefinitions.map((metric) => metric.id))
+  const selectedMetricIds = ensureMetricIds(metricIds.length > 0 ? metricIds : inferChartableMetricIds())
   const series = selectedMetricIds
     .map((metricId) => buildChartSeries(documents, metricId, normalize))
     .filter((entry): entry is ChartSeries => entry !== null && entry.pointCount > 0)
@@ -271,8 +274,12 @@ export function buildOverviewResponse(state: StoreState, range: DateRangeInput):
     'daily_sleep.score',
     'daily_activity.score',
     'daily_activity.steps',
+    'sleep.bedtime_start_minutes',
+    'sleep.bedtime_end_minutes',
     'sleep.total_sleep_duration',
+    'session.duration_minutes',
     'sleep.average_heart_rate',
+    'sleep_time.optimal_bedtime.start_offset_minutes',
     'daily_spo2.average',
     'vo2_max.value',
     'daily_cardiovascular_age.vascular_age',

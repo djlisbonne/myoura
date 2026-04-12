@@ -42,6 +42,10 @@ interface MultiDocumentResponse<T> {
   next_token: string | null
 }
 
+interface SingleDocumentResponse {
+  [key: string]: unknown
+}
+
 function resourceById(resourceId: ResourceId): ResourceDefinition {
   const resource = resourceDefinitions.find((entry) => entry.id === resourceId)
   if (!resource) {
@@ -66,6 +70,89 @@ function safeRecord(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined
+}
+
+function numberArray(value: unknown): number[] {
+  if (!value || !Array.isArray(value)) {
+    return []
+  }
+  return value.filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry))
+}
+
+function sampleAverage(value: unknown): number | null {
+  const items = numberArray(safeRecord(value).items)
+  if (items.length === 0) {
+    return null
+  }
+  return items.reduce((sum, item) => sum + item, 0) / items.length
+}
+
+function sampleMin(value: unknown): number | null {
+  const items = numberArray(safeRecord(value).items)
+  return items.length > 0 ? Math.min(...items) : null
+}
+
+function sampleMax(value: unknown): number | null {
+  const items = numberArray(safeRecord(value).items)
+  return items.length > 0 ? Math.max(...items) : null
+}
+
+function sampleCount(value: unknown): number | null {
+  const items = numberArray(safeRecord(value).items)
+  return items.length > 0 ? items.length : null
+}
+
+function sampleIntervalSeconds(value: unknown): number | null {
+  const interval = safeRecord(value).interval
+  return parseNumeric(interval)
+}
+
+function localMinutesFromDateTime(value: unknown, rolloverAfterNoon = false): number | null {
+  const text = stringValue(value)
+  if (!text) {
+    return null
+  }
+
+  const match = /T(\d{2}):(\d{2})/.exec(text)
+  if (!match) {
+    return null
+  }
+
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return null
+  }
+
+  const total = hours * 60 + minutes
+  return rolloverAfterNoon && total < 720 ? total + 1440 : total
+}
+
+function minutesBetween(start: unknown, end: unknown): number | null {
+  const startText = stringValue(start)
+  const endText = stringValue(end)
+  if (!startText || !endText) {
+    return null
+  }
+
+  const startDate = new Date(startText)
+  const endDate = new Date(endText)
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return null
+  }
+
+  return differenceInMinutes(endDate, startDate)
+}
+
+function durationMinutesFromOffsets(startOffset?: unknown, endOffset?: unknown): number | null {
+  const start = parseNumeric(startOffset)
+  const end = parseNumeric(endOffset)
+  if (start === null || end === null) {
+    return null
+  }
+
+  const durationSeconds = end >= start ? end - start : end + 86400 - start
+  return durationSeconds / 60
 }
 
 function metricForId(metricId: string) {
@@ -151,6 +238,10 @@ function buildDailyX(raw: Record<string, unknown>): { x: string; xType: ChartXTy
   return dayOrTimestamp({ day: stringValue(raw.day), timestamp: stringValue(raw.timestamp) }, nowIso())
 }
 
+function buildTimeSeriesX(raw: Record<string, unknown>): { x: string; xType: ChartXType } {
+  return dayOrTimestamp({ day: stringValue(raw.day), timestamp: stringValue(raw.timestamp) ?? stringValue(raw.start_datetime) }, nowIso())
+}
+
 function ordinalFromList(value: string | null | undefined, mapping: Record<number, string>): number | null {
   if (!value) {
     return null
@@ -165,21 +256,6 @@ function ordinalFromList(value: string | null | undefined, mapping: Record<numbe
 
 function parseNumeric(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function bedtimeStartMinutes(value: unknown): number | null {
-  const text = typeof value === 'string' ? value : null
-  if (!text) {
-    return null
-  }
-
-  const parsed = new Date(text)
-  if (Number.isNaN(parsed.getTime())) {
-    return null
-  }
-
-  const minutes = parsed.getUTCHours() * 60 + parsed.getUTCMinutes()
-  return minutes < 720 ? minutes + 1440 : minutes
 }
 
 function extractActivityDocument(item: Record<string, unknown>): StoredDocument {
@@ -305,20 +381,41 @@ function extractSleepDocument(item: Record<string, unknown>): StoredDocument {
   const metrics: StoredMetric[] = []
   pushMetric(metrics, 'sleep.total_sleep_duration', x, parseNumeric(item.total_sleep_duration))
   pushMetric(metrics, 'sleep.time_in_bed', x, parseNumeric(item.time_in_bed))
-  pushMetric(metrics, 'sleep.bedtime_start_minutes', x, bedtimeStartMinutes(item.bedtime_start))
+  pushMetric(metrics, 'sleep.bedtime_start_minutes', x, localMinutesFromDateTime(item.bedtime_start, true))
+  pushMetric(metrics, 'sleep.bedtime_end_minutes', x, localMinutesFromDateTime(item.bedtime_end, true))
+  pushMetric(metrics, 'sleep.bedtime_duration_minutes', x, minutesBetween(item.bedtime_start, item.bedtime_end))
+  pushMetric(metrics, 'sleep.time_in_bed_minutes', x, parseNumeric(item.time_in_bed) !== null ? (parseNumeric(item.time_in_bed) as number) / 60 : null)
+  pushMetric(metrics, 'sleep.total_sleep_duration_minutes', x, parseNumeric(item.total_sleep_duration) !== null ? (parseNumeric(item.total_sleep_duration) as number) / 60 : null)
   pushMetric(metrics, 'sleep.deep_sleep_duration', x, parseNumeric(item.deep_sleep_duration))
   pushMetric(metrics, 'sleep.light_sleep_duration', x, parseNumeric(item.light_sleep_duration))
   pushMetric(metrics, 'sleep.rem_sleep_duration', x, parseNumeric(item.rem_sleep_duration))
   pushMetric(metrics, 'sleep.awake_time', x, parseNumeric(item.awake_time))
+  pushMetric(metrics, 'sleep.average_breath', x, parseNumeric(item.average_breath))
   pushMetric(metrics, 'sleep.efficiency', x, parseNumeric(item.efficiency))
   pushMetric(metrics, 'sleep.latency', x, parseNumeric(item.latency))
   pushMetric(metrics, 'sleep.lowest_heart_rate', x, parseNumeric(item.lowest_heart_rate))
   pushMetric(metrics, 'sleep.average_heart_rate', x, parseNumeric(item.average_heart_rate))
   pushMetric(metrics, 'sleep.average_hrv', x, parseNumeric(item.average_hrv))
+  pushMetric(metrics, 'sleep.heart_rate_sample_mean', x, sampleAverage(item.heart_rate))
+  pushMetric(metrics, 'sleep.heart_rate_sample_min', x, sampleMin(item.heart_rate))
+  pushMetric(metrics, 'sleep.heart_rate_sample_max', x, sampleMax(item.heart_rate))
+  pushMetric(metrics, 'sleep.heart_rate_sample_count', x, sampleCount(item.heart_rate))
+  pushMetric(metrics, 'sleep.hrv_sample_mean', x, sampleAverage(item.hrv))
+  pushMetric(metrics, 'sleep.hrv_sample_min', x, sampleMin(item.hrv))
+  pushMetric(metrics, 'sleep.hrv_sample_max', x, sampleMax(item.hrv))
+  pushMetric(metrics, 'sleep.hrv_sample_count', x, sampleCount(item.hrv))
   pushMetric(metrics, 'sleep.readiness_score_delta', x, parseNumeric(item.readiness_score_delta))
   pushMetric(metrics, 'sleep.sleep_score_delta', x, parseNumeric(item.sleep_score_delta))
+  pushMetric(metrics, 'sleep.period', x, parseNumeric(item.period))
   const sleepType = typeof item.type === 'string' ? item.type : null
   pushMetric(metrics, 'sleep.type', x, ordinalFromList(sleepType, { 0: 'deleted', 1: 'rest', 2: 'sleep', 3: 'late_nap', 4: 'long_sleep' }), sleepType, sleepType)
+  pushMetric(metrics, 'sleep.low_battery_alert', x, typeof item.low_battery_alert === 'boolean' ? (item.low_battery_alert ? 1 : 0) : null, typeof item.low_battery_alert === 'boolean' ? (item.low_battery_alert ? 'true' : 'false') : null, item.low_battery_alert)
+  pushMetric(metrics, 'sleep.movement_30_sec', x, null, stringValue(item.movement_30_sec), item.movement_30_sec, { length: stringValue(item.movement_30_sec)?.length ?? 0 })
+  pushMetric(metrics, 'sleep.movement_30_sec_length', x, stringValue(item.movement_30_sec)?.length ?? null, undefined, item.movement_30_sec)
+  pushMetric(metrics, 'sleep.sleep_phase_5_min', x, null, stringValue(item.sleep_phase_5_min), item.sleep_phase_5_min, { length: stringValue(item.sleep_phase_5_min)?.length ?? 0 })
+  pushMetric(metrics, 'sleep.sleep_phase_5_min_length', x, stringValue(item.sleep_phase_5_min)?.length ?? null, undefined, item.sleep_phase_5_min)
+  pushMetric(metrics, 'sleep.sleep_algorithm_version', x, null, stringValue(item.sleep_algorithm_version), item.sleep_algorithm_version)
+  pushMetric(metrics, 'sleep.sleep_analysis_reason', x, null, stringValue(item.sleep_analysis_reason), item.sleep_analysis_reason)
   return createDocument('sleep', x, item, metrics)
 }
 
@@ -328,6 +425,8 @@ function extractHeartrateDocument(item: Record<string, unknown>): StoredDocument
   pushMetric(metrics, 'heartrate.bpm', x, parseNumeric(item.bpm), undefined, item.bpm, {
     source: item.source,
   })
+  const source = typeof item.source === 'string' ? item.source : null
+  pushMetric(metrics, 'heartrate.source', x, ordinalFromList(source, { 1: 'awake', 2: 'rest', 3: 'sleep', 4: 'session', 5: 'live', 6: 'workout' }), source, source)
   return createDocument('heartrate', x, item, metrics)
 }
 
@@ -356,6 +455,8 @@ function extractWorkoutDocument(item: Record<string, unknown>): StoredDocument {
   pushMetric(metrics, 'workout.source', x, ordinalFromList(source, { 1: 'manual', 2: 'autodetected', 3: 'confirmed', 4: 'workout_heart_rate' }), source, source, {
     activity: item.activity,
   })
+  pushMetric(metrics, 'workout.label', x, null, stringValue(item.label), item.label)
+  pushMetric(metrics, 'workout.activity', x, null, stringValue(item.activity), item.activity)
   return createDocument('workout', x, item, metrics)
 }
 
@@ -365,7 +466,129 @@ function extractTagDocument(resourceId: 'tag' | 'enhanced_tag', item: Record<str
   const textValue = typeof item.text === 'string' ? item.text : null
   const tags = Array.isArray(item.tags) ? item.tags.filter((tag) => typeof tag === 'string') : []
   pushMetric(metrics, `${resourceId}.count`, x, 1, textValue, textValue ?? tags.join(', '), { tags })
+  if (resourceId === 'tag') {
+    pushMetric(metrics, 'tag.text', x, null, textValue, item.text, { tags })
+    pushMetric(metrics, 'tag.tags.count', x, tags.length, undefined, tags)
+  } else {
+    const durationMinutes = minutesBetween(item.start_time, item.end_time)
+    pushMetric(metrics, 'enhanced_tag.custom_name', x, null, stringValue(item.custom_name), item.custom_name)
+    pushMetric(metrics, 'enhanced_tag.comment', x, null, stringValue(item.comment), item.comment)
+    pushMetric(metrics, 'enhanced_tag.tag_type_code', x, null, stringValue(item.tag_type_code), item.tag_type_code)
+    pushMetric(metrics, 'enhanced_tag.duration_minutes', x, durationMinutes, undefined, {
+      start_time: item.start_time,
+      end_time: item.end_time,
+    })
+  }
   return createDocument(resourceId, x, item, metrics)
+}
+
+function extractSessionDocument(item: Record<string, unknown>): StoredDocument {
+  const x = buildTimeSeriesX(item)
+  const metrics: StoredMetric[] = []
+  const type = typeof item.type === 'string' ? item.type : null
+  const mood = typeof item.mood === 'string' ? item.mood : null
+  const heartRate = safeRecord(item.heart_rate)
+  const hrv = safeRecord(item.heart_rate_variability)
+  const motionCount = safeRecord(item.motion_count)
+
+  pushMetric(metrics, 'session.duration_minutes', x, minutesBetween(item.start_datetime, item.end_datetime))
+  pushMetric(metrics, 'session.type', x, ordinalFromList(type, { 1: 'breathing', 2: 'meditation', 3: 'nap', 4: 'relaxation', 5: 'rest', 6: 'body_status' }), type, type)
+  pushMetric(metrics, 'session.mood', x, ordinalFromList(mood, { 1: 'bad', 2: 'worse', 3: 'same', 4: 'good', 5: 'great' }), mood, mood)
+  pushMetric(metrics, 'session.heart_rate.mean', x, sampleAverage(heartRate))
+  pushMetric(metrics, 'session.heart_rate.min', x, sampleMin(heartRate))
+  pushMetric(metrics, 'session.heart_rate.max', x, sampleMax(heartRate))
+  pushMetric(metrics, 'session.heart_rate.sample_count', x, sampleCount(heartRate))
+  pushMetric(metrics, 'session.heart_rate.interval_seconds', x, sampleIntervalSeconds(heartRate))
+  pushMetric(metrics, 'session.heart_rate_variability.mean', x, sampleAverage(hrv))
+  pushMetric(metrics, 'session.heart_rate_variability.sample_count', x, sampleCount(hrv))
+  pushMetric(metrics, 'session.motion_count.mean', x, sampleAverage(motionCount))
+  pushMetric(metrics, 'session.motion_count.sample_count', x, sampleCount(motionCount))
+  return createDocument('session', x, item, metrics)
+}
+
+function extractSleepTimeDocument(item: Record<string, unknown>): StoredDocument {
+  const x = buildDailyX(item)
+  const metrics: StoredMetric[] = []
+  const optimal = safeRecord(item.optimal_bedtime)
+  pushMetric(metrics, 'sleep_time.optimal_bedtime.start_offset_minutes', x, parseNumeric(optimal.start_offset) !== null ? (parseNumeric(optimal.start_offset) as number) / 60 : null)
+  pushMetric(metrics, 'sleep_time.optimal_bedtime.end_offset_minutes', x, parseNumeric(optimal.end_offset) !== null ? (parseNumeric(optimal.end_offset) as number) / 60 : null)
+  pushMetric(metrics, 'sleep_time.optimal_bedtime.window_minutes', x, durationMinutesFromOffsets(optimal.start_offset, optimal.end_offset))
+  pushMetric(metrics, 'sleep_time.optimal_bedtime.midpoint_minutes', x, (() => {
+    const start = parseNumeric(optimal.start_offset)
+    const end = parseNumeric(optimal.end_offset)
+    if (start === null || end === null) {
+      return null
+    }
+    const durationSeconds = end >= start ? end - start : end + 86400 - start
+    return (start + durationSeconds / 2) / 60
+  })())
+  pushMetric(metrics, 'sleep_time.optimal_bedtime.day_tz_seconds', x, parseNumeric(optimal.day_tz))
+  const recommendation = typeof item.recommendation === 'string' ? item.recommendation : null
+  const status = typeof item.status === 'string' ? item.status : null
+  pushMetric(metrics, 'sleep_time.recommendation', x, ordinalFromList(recommendation, {
+    1: 'improve_efficiency',
+    2: 'earlier_bedtime',
+    3: 'later_bedtime',
+    4: 'earlier_wake_up_time',
+    5: 'later_wake_up_time',
+    6: 'follow_optimal_bedtime',
+  }), recommendation, recommendation)
+  pushMetric(metrics, 'sleep_time.status', x, ordinalFromList(status, {
+    1: 'not_enough_nights',
+    2: 'not_enough_recent_nights',
+    3: 'bad_sleep_quality',
+    4: 'only_recommended_found',
+    5: 'optimal_found',
+  }), status, status)
+  return createDocument('sleep_time', x, item, metrics)
+}
+
+function extractRestModePeriodDocument(item: Record<string, unknown>): StoredDocument {
+  const x = dayOrTimestamp({ day: stringValue(item.start_day), timestamp: stringValue(item.start_time) ?? stringValue(item.end_time) }, nowIso())
+  const metrics: StoredMetric[] = []
+  const episodes = Array.isArray(item.episodes) ? item.episodes : []
+  const episodeCount = episodes.length
+  const tagCount = episodes.reduce((count, episode) => {
+    const episodeRecord = safeRecord(episode)
+    return count + (Array.isArray(episodeRecord.tags) ? episodeRecord.tags.length : 0)
+  }, 0)
+  const startDay = stringValue(item.start_day)
+  const endDay = stringValue(item.end_day)
+  let durationDays: number | null = null
+  if (startDay) {
+    const start = new Date(`${startDay}T00:00:00.000Z`)
+    const end = endDay ? new Date(`${endDay}T00:00:00.000Z`) : null
+    if (!Number.isNaN(start.getTime()) && end && !Number.isNaN(end.getTime())) {
+      durationDays = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86400000) + 1)
+    }
+  }
+  pushMetric(metrics, 'rest_mode_period.duration_days', x, durationDays)
+  pushMetric(metrics, 'rest_mode_period.duration_hours', x, durationDays !== null ? durationDays * 24 : null)
+  pushMetric(metrics, 'rest_mode_period.episode_count', x, episodeCount)
+  pushMetric(metrics, 'rest_mode_period.tag_count', x, tagCount)
+  return createDocument('rest_mode_period', x, item, metrics)
+}
+
+function extractRingConfigurationDocument(item: Record<string, unknown>): StoredDocument {
+  const x = dayOrTimestamp({ timestamp: stringValue(item.set_up_at) }, nowIso())
+  const metrics: StoredMetric[] = []
+  pushMetric(metrics, 'ring_configuration.size', x, parseNumeric(item.size))
+  pushMetric(metrics, 'ring_configuration.firmware_version', x, null, stringValue(item.firmware_version), item.firmware_version)
+  pushMetric(metrics, 'ring_configuration.color', x, null, stringValue(item.color), item.color)
+  pushMetric(metrics, 'ring_configuration.design', x, null, stringValue(item.design), item.design)
+  pushMetric(metrics, 'ring_configuration.hardware_type', x, null, stringValue(item.hardware_type), item.hardware_type)
+  return createDocument('ring_configuration', x, item, metrics)
+}
+
+function extractPersonalInfoDocument(item: Record<string, unknown>): StoredDocument {
+  const x = dayOrTimestamp({ timestamp: nowIso() }, nowIso())
+  const metrics: StoredMetric[] = []
+  pushMetric(metrics, 'personal_info.age', x, parseNumeric(item.age))
+  pushMetric(metrics, 'personal_info.weight', x, parseNumeric(item.weight))
+  pushMetric(metrics, 'personal_info.height', x, parseNumeric(item.height))
+  pushMetric(metrics, 'personal_info.biological_sex', x, null, stringValue(item.biological_sex), item.biological_sex)
+  pushMetric(metrics, 'personal_info.email', x, null, stringValue(item.email), item.email)
+  return createDocument('personal_info', x, item, metrics)
 }
 
 function normalizeResourceItem(resourceId: ResourceId, item: unknown): StoredDocument | null {
@@ -397,6 +620,16 @@ function normalizeResourceItem(resourceId: ResourceId, item: unknown): StoredDoc
       return extractTagDocument('tag', raw)
     case 'enhanced_tag':
       return extractTagDocument('enhanced_tag', raw)
+    case 'session':
+      return extractSessionDocument(raw)
+    case 'sleep_time':
+      return extractSleepTimeDocument(raw)
+    case 'rest_mode_period':
+      return extractRestModePeriodDocument(raw)
+    case 'ring_configuration':
+      return extractRingConfigurationDocument(raw)
+    case 'personal_info':
+      return extractPersonalInfoDocument(raw)
     default:
       return null
   }
@@ -449,6 +682,15 @@ export function importDocumentsFromPayload(payload: unknown): { documents: Store
   if (documents.length === 0) {
     for (const resource of resourceDefinitions) {
       const items = root[resource.id]
+      if (resource.collectionType === 'single') {
+        if (items && typeof items === 'object' && !Array.isArray(items)) {
+          const document = normalizeResourceItem(resource.id, items)
+          if (document) {
+            documents.push(document)
+          }
+        }
+        continue
+      }
       if (!Array.isArray(items)) {
         continue
       }
@@ -469,6 +711,26 @@ export function importDocumentsFromPayload(payload: unknown): { documents: Store
   return { documents, warnings }
 }
 
+function buildResourceRequestUrl(
+  baseUrl: string,
+  resource: ResourceDefinition,
+  range: DateRangeInput,
+  nextToken?: string | null,
+): URL {
+  const url = new URL(`${baseUrl}${resource.path}`)
+  if (resource.queryMode === 'date') {
+    url.searchParams.set('start_date', range.startDate)
+    url.searchParams.set('end_date', range.endDate)
+  } else if (resource.queryMode === 'datetime') {
+    url.searchParams.set('start_datetime', `${range.startDate}T00:00:00`)
+    url.searchParams.set('end_datetime', `${range.endDate}T23:59:59`)
+  }
+  if (nextToken) {
+    url.searchParams.set('next_token', nextToken)
+  }
+  return url
+}
+
 async function fetchResourcePage(
   baseUrl: string,
   token: string,
@@ -476,13 +738,7 @@ async function fetchResourcePage(
   range: DateRangeInput,
   nextToken?: string | null,
 ): Promise<MultiDocumentResponse<unknown>> {
-  const url = new URL(`${baseUrl}${resource.path}`)
-  url.searchParams.set('start_date', range.startDate)
-  url.searchParams.set('end_date', range.endDate)
-  if (nextToken) {
-    url.searchParams.set('next_token', nextToken)
-  }
-
+  const url = buildResourceRequestUrl(baseUrl, resource, range, nextToken)
   const response = await fetch(url, {
     headers: resourceHeader(token),
   })
@@ -499,12 +755,39 @@ async function fetchResourcePage(
   }
 }
 
+async function fetchSingleResourceDocument(
+  baseUrl: string,
+  token: string,
+  resource: ResourceDefinition,
+): Promise<{ rawCount: number; documents: StoredDocument[] }> {
+  const url = new URL(`${baseUrl}${resource.path}`)
+  const response = await fetch(url, {
+    headers: resourceHeader(token),
+  })
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new Error(`Oura ${resource.id} request failed with ${response.status}: ${body || response.statusText}`)
+  }
+
+  const payload = (await response.json()) as SingleDocumentResponse
+  const document = normalizeResourceItem(resource.id, payload)
+  return {
+    rawCount: document ? 1 : 0,
+    documents: document ? [document] : [],
+  }
+}
+
 async function fetchAllResourceDocuments(
   baseUrl: string,
   token: string,
   resource: ResourceDefinition,
   range: DateRangeInput,
 ): Promise<{ rawCount: number; documents: StoredDocument[] }> {
+  if (resource.collectionType === 'single') {
+    return fetchSingleResourceDocument(baseUrl, token, resource)
+  }
+
   const rawItems: unknown[] = []
   let nextToken: string | null | undefined = undefined
 
@@ -602,6 +885,10 @@ function demoDailyMetricSets(day: Date, dayIndex: number, rng: () => number) {
   const recoveryHigh = Math.round(randomBetween(rng, 1800, 12600))
   const vascularAge = clamp(Math.round(40 + Math.sin(dayIndex / 10) * 2 + randomBetween(rng, -1.5, 2.5)), 18, 100)
   const vo2Max = clamp(Math.round(36 + Math.sin(dayIndex / 8) * 2.5 + randomBetween(rng, -1.2, 1.8)), 18, 80)
+  const bedtimeStartMinutes = Math.round(21.8 * 60 + randomBetween(rng, -50, 40))
+  const bedtimeEndMinutes = Math.round(6.4 * 60 + randomBetween(rng, -35, 35))
+  const sleepWindowStart = Math.round((21.5 + randomBetween(rng, -0.8, 0.6)) * 3600)
+  const sleepWindowEnd = Math.round((6.4 + randomBetween(rng, -0.4, 0.8)) * 3600)
 
   return {
     readinessScore,
@@ -617,6 +904,10 @@ function demoDailyMetricSets(day: Date, dayIndex: number, rng: () => number) {
     recoveryHigh,
     vascularAge,
     vo2Max,
+    bedtimeStartMinutes,
+    bedtimeEndMinutes,
+    sleepWindowStart,
+    sleepWindowEnd,
   }
 }
 
@@ -640,8 +931,30 @@ export function buildDemoDocuments(days = 30): StoredDocument[] {
     const resilienceLevel = randomPick(rng, ['limited', 'adequate', 'solid', 'strong', 'exceptional'])
     const workoutIntensity = randomPick(rng, ['easy', 'moderate', 'hard'])
     const workoutSource = randomPick(rng, ['manual', 'autodetected', 'confirmed', 'workout_heart_rate'])
+    const timezoneOffsetSeconds = -new Date().getTimezoneOffset() * 60
 
     documents.push(
+      ...(index === 0
+        ? [
+            extractPersonalInfoDocument({
+              id: 'demo-personal-info',
+              age: 38,
+              weight: 78.4,
+              height: 180,
+              biological_sex: 'male',
+              email: 'demo@example.com',
+            }),
+            extractRingConfigurationDocument({
+              id: 'demo-ring-configuration',
+              color: 'stealth_black',
+              design: 'horizon',
+              firmware_version: '2.5.1',
+              hardware_type: 'gen3',
+              set_up_at: `${day}T09:00:00`,
+              size: 9,
+            }),
+          ]
+        : []),
       extractActivityDocument({
         id: `demo-activity-${day}`,
         day,
@@ -748,6 +1061,30 @@ export function buildDemoDocuments(days = 30): StoredDocument[] {
         timestamp: `${day}T09:15:00`,
         vo2_max: series.vo2Max,
       }),
+      extractSleepTimeDocument({
+        id: `demo-sleep-time-${day}`,
+        day,
+        optimal_bedtime: {
+          day_tz: timezoneOffsetSeconds,
+          start_offset: series.sleepWindowStart,
+          end_offset: series.sleepWindowEnd,
+        },
+        recommendation: randomPick(rng, [
+          'improve_efficiency',
+          'earlier_bedtime',
+          'later_bedtime',
+          'earlier_wake_up_time',
+          'later_wake_up_time',
+          'follow_optimal_bedtime',
+        ]),
+        status: randomPick(rng, [
+          'not_enough_nights',
+          'not_enough_recent_nights',
+          'bad_sleep_quality',
+          'only_recommended_found',
+          'optimal_found',
+        ]),
+      }),
       extractSleepDocument({
         id: `demo-sleep-period-${day}`,
         day,
@@ -786,6 +1123,48 @@ export function buildDemoDocuments(days = 30): StoredDocument[] {
         time_in_bed: series.totalSleep + series.awakeTime + Math.round(randomBetween(rng, 400, 1200)),
         total_sleep_duration: series.totalSleep,
       }),
+      ...(index % 4 === 0
+        ? [
+            extractSessionDocument({
+              id: `demo-session-${day}`,
+              day,
+              start_datetime: `${day}T12:15:00`,
+              end_datetime: `${day}T12:44:00`,
+              type: randomPick(rng, ['breathing', 'meditation', 'nap', 'relaxation', 'rest', 'body_status']),
+              mood: randomPick(rng, ['bad', 'worse', 'same', 'good', 'great']),
+              heart_rate: {
+                interval: 30,
+                items: [61, 59, 57, 58, 56, 55, 57, 60],
+                timestamp: `${day}T12:15:00`,
+              },
+              heart_rate_variability: {
+                interval: 30,
+                items: [48, 50, 52, 51, 53],
+                timestamp: `${day}T12:15:00`,
+              },
+              motion_count: {
+                interval: 30,
+                items: [1, 1, 0, 2, 1, 0, 1],
+                timestamp: `${day}T12:15:00`,
+              },
+            }),
+          ]
+        : []),
+      ...(index % 10 === 0
+        ? [
+            extractRestModePeriodDocument({
+              id: `demo-rest-mode-${day}`,
+              start_day: day,
+              start_time: `${day}T20:30:00`,
+              end_day: formatISO(addDays(current, 2), { representation: 'date' }),
+              end_time: `${formatISO(addDays(current, 2), { representation: 'date' })}T07:15:00`,
+              episodes: [
+                { tags: ['recovery', 'low_light'], timestamp: `${day}T20:45:00` },
+                { tags: ['sleep', 'quiet'], timestamp: `${day}T22:10:00` },
+              ],
+            }),
+          ]
+        : []),
     )
 
     if (index % 2 === 0) {

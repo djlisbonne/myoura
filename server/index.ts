@@ -94,10 +94,7 @@ app.get('/api/health', async (_req, res) => {
       ...(state.demoSeededAt ? { demoSeededAt: state.demoSeededAt } : {}),
     },
     auth: {
-      oura: {
-        hasPersonalAccessToken: Boolean(process.env.OURA_PERSONAL_ACCESS_TOKEN),
-        ...oauth,
-      },
+      oura: oauth,
     },
   }
   res.json(payload)
@@ -107,10 +104,7 @@ app.get('/api/auth/oura/status', async (_req, res) => {
   const oauth = await getOauthStatus()
   res.json({
     ok: true,
-    oura: {
-      hasPersonalAccessToken: Boolean(process.env.OURA_PERSONAL_ACCESS_TOKEN),
-      ...oauth,
-    },
+    oura: oauth,
   })
 })
 

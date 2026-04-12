@@ -183,10 +183,14 @@ async function writeStoredToken(token: StoredOAuthToken) {
 export async function getOauthStatus() {
   const hasClientCredentials = Boolean(process.env.OURA_CLIENT_ID && process.env.OURA_CLIENT_SECRET)
   const token = await readStoredToken()
+  const hasPersonalAccessToken = Boolean(process.env.OURA_PERSONAL_ACCESS_TOKEN)
+  const authMode = token?.accessToken ? ('oauth' as const) : hasPersonalAccessToken ? ('pat' as const) : ('none' as const)
 
   return {
     hasClientCredentials,
-    connected: Boolean(token?.accessToken),
+    hasPersonalAccessToken,
+    connected: authMode !== 'none',
+    authMode,
     expiresAt: token?.expiresAt,
     scope: token?.scope,
     responseType: authResponseType(),
@@ -213,6 +217,30 @@ export async function storeDirectAccessToken(input: {
 }
 
 export async function resolveOuraAccessToken() {
+  const token = await readStoredToken()
+  if (token?.accessToken && !isExpired(token)) {
+    return {
+      accessToken: token.accessToken,
+      authMode: 'oauth' as const,
+    }
+  }
+
+  if (token?.accessToken && token.refreshToken) {
+    const refreshed = await exchangeToken(
+      new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: token.refreshToken,
+      }),
+    )
+    const nextToken = tokenFromResponse(refreshed, token)
+    await writeStoredToken(nextToken)
+
+    return {
+      accessToken: nextToken.accessToken,
+      authMode: 'oauth' as const,
+    }
+  }
+
   if (process.env.OURA_PERSONAL_ACCESS_TOKEN) {
     return {
       accessToken: process.env.OURA_PERSONAL_ACCESS_TOKEN,
@@ -220,35 +248,11 @@ export async function resolveOuraAccessToken() {
     }
   }
 
-  const token = await readStoredToken()
-  if (!token?.accessToken) {
-    throw new Error('No Oura access token is configured. Connect Oura or set OURA_PERSONAL_ACCESS_TOKEN.')
-  }
-
-  if (!isExpired(token)) {
-    return {
-      accessToken: token.accessToken,
-      authMode: 'oauth' as const,
-    }
-  }
-
-  if (!token.refreshToken) {
+  if (token?.accessToken) {
     throw new Error('Stored Oura OAuth token has expired and no refresh token is available.')
   }
 
-  const refreshed = await exchangeToken(
-    new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: token.refreshToken,
-    }),
-  )
-  const nextToken = tokenFromResponse(refreshed, token)
-  await writeStoredToken(nextToken)
-
-  return {
-    accessToken: nextToken.accessToken,
-    authMode: 'oauth' as const,
-  }
+  throw new Error('No Oura access token is configured. Connect Oura or set OURA_PERSONAL_ACCESS_TOKEN.')
 }
 
 export function callbackRedirect(success: boolean, error?: string) {

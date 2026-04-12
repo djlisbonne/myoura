@@ -20,11 +20,18 @@ export const resourceSchema = z.enum([
   'workout',
   'tag',
   'enhanced_tag',
+  'personal_info',
+  'session',
+  'sleep_time',
+  'rest_mode_period',
+  'ring_configuration',
 ])
 
 export type ResourceId = z.infer<typeof resourceSchema>
 
 export type ResourceKind = 'daily' | 'intraday' | 'event' | 'profile'
+export type ResourceQueryMode = 'date' | 'datetime' | 'none'
+export type ResourceCollectionType = 'multi' | 'single'
 export type MetricCategory = 'score' | 'quantity' | 'duration' | 'rate' | 'ordinal' | 'text' | 'event'
 export type ChartXType = 'day' | 'timestamp'
 
@@ -36,6 +43,8 @@ export interface ResourceDefinition {
   kind: ResourceKind
   defaultLookbackDays: number
   chartable: boolean
+  queryMode: ResourceQueryMode
+  collectionType: ResourceCollectionType
 }
 
 export interface MetricDefinition {
@@ -212,6 +221,7 @@ export interface HealthResponse {
       hasPersonalAccessToken: boolean
       hasClientCredentials: boolean
       connected: boolean
+      authMode?: 'oauth' | 'pat' | 'none'
       expiresAt?: string
       scope?: string
       responseType?: 'code' | 'token'
@@ -272,6 +282,8 @@ export const resourceDefinitions: ResourceDefinition[] = [
     kind: 'daily',
     defaultLookbackDays: 30,
     chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
   },
   {
     id: 'daily_readiness',
@@ -281,6 +293,8 @@ export const resourceDefinitions: ResourceDefinition[] = [
     kind: 'daily',
     defaultLookbackDays: 30,
     chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
   },
   {
     id: 'daily_sleep',
@@ -290,6 +304,8 @@ export const resourceDefinitions: ResourceDefinition[] = [
     kind: 'daily',
     defaultLookbackDays: 30,
     chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
   },
   {
     id: 'daily_stress',
@@ -299,6 +315,8 @@ export const resourceDefinitions: ResourceDefinition[] = [
     kind: 'daily',
     defaultLookbackDays: 30,
     chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
   },
   {
     id: 'daily_resilience',
@@ -308,6 +326,8 @@ export const resourceDefinitions: ResourceDefinition[] = [
     kind: 'daily',
     defaultLookbackDays: 30,
     chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
   },
   {
     id: 'daily_spo2',
@@ -317,6 +337,8 @@ export const resourceDefinitions: ResourceDefinition[] = [
     kind: 'daily',
     defaultLookbackDays: 30,
     chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
   },
   {
     id: 'daily_cardiovascular_age',
@@ -326,6 +348,8 @@ export const resourceDefinitions: ResourceDefinition[] = [
     kind: 'daily',
     defaultLookbackDays: 30,
     chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
   },
   {
     id: 'vo2_max',
@@ -335,6 +359,8 @@ export const resourceDefinitions: ResourceDefinition[] = [
     kind: 'daily',
     defaultLookbackDays: 60,
     chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
   },
   {
     id: 'sleep',
@@ -344,6 +370,8 @@ export const resourceDefinitions: ResourceDefinition[] = [
     kind: 'daily',
     defaultLookbackDays: 30,
     chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
   },
   {
     id: 'heartrate',
@@ -353,6 +381,8 @@ export const resourceDefinitions: ResourceDefinition[] = [
     kind: 'intraday',
     defaultLookbackDays: 14,
     chartable: true,
+    queryMode: 'datetime',
+    collectionType: 'multi',
   },
   {
     id: 'workout',
@@ -362,6 +392,8 @@ export const resourceDefinitions: ResourceDefinition[] = [
     kind: 'event',
     defaultLookbackDays: 60,
     chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
   },
   {
     id: 'tag',
@@ -371,6 +403,8 @@ export const resourceDefinitions: ResourceDefinition[] = [
     kind: 'event',
     defaultLookbackDays: 90,
     chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
   },
   {
     id: 'enhanced_tag',
@@ -380,6 +414,63 @@ export const resourceDefinitions: ResourceDefinition[] = [
     kind: 'event',
     defaultLookbackDays: 90,
     chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
+  },
+  {
+    id: 'personal_info',
+    label: 'Personal info',
+    description: 'Profile snapshot fields from Oura.',
+    path: '/v2/usercollection/personal_info',
+    kind: 'profile',
+    defaultLookbackDays: 365,
+    chartable: false,
+    queryMode: 'none',
+    collectionType: 'single',
+  },
+  {
+    id: 'session',
+    label: 'Sessions',
+    description: 'Meditation, breathing, and rest sessions with physiological samples.',
+    path: '/v2/usercollection/session',
+    kind: 'event',
+    defaultLookbackDays: 60,
+    chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
+  },
+  {
+    id: 'sleep_time',
+    label: 'Sleep time',
+    description: 'Recommended bedtime window and sleep-time status.',
+    path: '/v2/usercollection/sleep_time',
+    kind: 'daily',
+    defaultLookbackDays: 60,
+    chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
+  },
+  {
+    id: 'rest_mode_period',
+    label: 'Rest mode periods',
+    description: 'Rest mode windows and episode tags.',
+    path: '/v2/usercollection/rest_mode_period',
+    kind: 'event',
+    defaultLookbackDays: 90,
+    chartable: true,
+    queryMode: 'date',
+    collectionType: 'multi',
+  },
+  {
+    id: 'ring_configuration',
+    label: 'Ring configuration',
+    description: 'Ring setup, hardware, and firmware details.',
+    path: '/v2/usercollection/ring_configuration',
+    kind: 'profile',
+    defaultLookbackDays: 365,
+    chartable: false,
+    queryMode: 'none',
+    collectionType: 'multi',
   },
 ]
 
@@ -467,22 +558,44 @@ const sleepMetrics: MetricDefinition[] = [
   { id: 'sleep.total_sleep_duration', resourceId: 'sleep', label: 'Total sleep duration', description: 'Total sleep duration.', unit: 'sec', category: 'duration', chartable: true },
   { id: 'sleep.time_in_bed', resourceId: 'sleep', label: 'Time in bed', description: 'Time spent in bed.', unit: 'sec', category: 'duration', chartable: true },
   { id: 'sleep.bedtime_start_minutes', resourceId: 'sleep', label: 'Bedtime start', description: 'Bedtime start as minutes from midnight.', unit: 'min', category: 'quantity', chartable: true },
+  { id: 'sleep.bedtime_end_minutes', resourceId: 'sleep', label: 'Bedtime end', description: 'Bedtime end as minutes from midnight.', unit: 'min', category: 'quantity', chartable: true },
+  { id: 'sleep.bedtime_duration_minutes', resourceId: 'sleep', label: 'Bedtime duration', description: 'Duration between bedtime start and end.', unit: 'min', category: 'duration', chartable: true },
+  { id: 'sleep.time_in_bed_minutes', resourceId: 'sleep', label: 'Time in bed (min)', description: 'Time spent in bed, converted to minutes.', unit: 'min', category: 'duration', chartable: true },
+  { id: 'sleep.total_sleep_duration_minutes', resourceId: 'sleep', label: 'Total sleep (min)', description: 'Total sleep duration, converted to minutes.', unit: 'min', category: 'duration', chartable: true },
   { id: 'sleep.deep_sleep_duration', resourceId: 'sleep', label: 'Deep sleep duration', description: 'Duration in deep sleep.', unit: 'sec', category: 'duration', chartable: true },
   { id: 'sleep.light_sleep_duration', resourceId: 'sleep', label: 'Light sleep duration', description: 'Duration in light sleep.', unit: 'sec', category: 'duration', chartable: true },
   { id: 'sleep.rem_sleep_duration', resourceId: 'sleep', label: 'REM sleep duration', description: 'Duration in REM sleep.', unit: 'sec', category: 'duration', chartable: true },
   { id: 'sleep.awake_time', resourceId: 'sleep', label: 'Awake time', description: 'Awake time.', unit: 'sec', category: 'duration', chartable: true },
+  { id: 'sleep.average_breath', resourceId: 'sleep', label: 'Average breath', description: 'Average breathing rate during sleep.', unit: 'breaths/sec', category: 'rate', chartable: true },
   { id: 'sleep.efficiency', resourceId: 'sleep', label: 'Efficiency', description: 'Sleep efficiency.', unit: 'score', category: 'score', chartable: true },
   { id: 'sleep.latency', resourceId: 'sleep', label: 'Latency', description: 'Sleep latency.', unit: 'sec', category: 'duration', chartable: true },
   { id: 'sleep.lowest_heart_rate', resourceId: 'sleep', label: 'Lowest heart rate', description: 'Lowest heart rate during sleep.', unit: 'bpm', category: 'rate', chartable: true },
   { id: 'sleep.average_heart_rate', resourceId: 'sleep', label: 'Average heart rate', description: 'Average heart rate during sleep.', unit: 'bpm', category: 'rate', chartable: true },
   { id: 'sleep.average_hrv', resourceId: 'sleep', label: 'Average HRV', description: 'Average heart rate variability during sleep.', unit: 'ms', category: 'quantity', chartable: true },
+  { id: 'sleep.heart_rate_sample_mean', resourceId: 'sleep', label: 'Sleep heart rate sample mean', description: 'Average heart rate sample across the sleep period.', unit: 'bpm', category: 'rate', chartable: true },
+  { id: 'sleep.heart_rate_sample_min', resourceId: 'sleep', label: 'Sleep heart rate sample min', description: 'Minimum sampled heart rate across the sleep period.', unit: 'bpm', category: 'rate', chartable: true },
+  { id: 'sleep.heart_rate_sample_max', resourceId: 'sleep', label: 'Sleep heart rate sample max', description: 'Maximum sampled heart rate across the sleep period.', unit: 'bpm', category: 'rate', chartable: true },
+  { id: 'sleep.heart_rate_sample_count', resourceId: 'sleep', label: 'Sleep heart rate samples', description: 'Number of heart rate samples during sleep.', unit: 'count', category: 'quantity', chartable: true },
+  { id: 'sleep.hrv_sample_mean', resourceId: 'sleep', label: 'Sleep HRV sample mean', description: 'Average HRV sample across the sleep period.', unit: 'ms', category: 'quantity', chartable: true },
+  { id: 'sleep.hrv_sample_min', resourceId: 'sleep', label: 'Sleep HRV sample min', description: 'Minimum sampled HRV across the sleep period.', unit: 'ms', category: 'quantity', chartable: true },
+  { id: 'sleep.hrv_sample_max', resourceId: 'sleep', label: 'Sleep HRV sample max', description: 'Maximum sampled HRV across the sleep period.', unit: 'ms', category: 'quantity', chartable: true },
+  { id: 'sleep.hrv_sample_count', resourceId: 'sleep', label: 'Sleep HRV samples', description: 'Number of HRV samples during sleep.', unit: 'count', category: 'quantity', chartable: true },
   { id: 'sleep.readiness_score_delta', resourceId: 'sleep', label: 'Readiness score delta', description: 'Effect on readiness score.', unit: 'score', category: 'score', chartable: true },
   { id: 'sleep.sleep_score_delta', resourceId: 'sleep', label: 'Sleep score delta', description: 'Effect on sleep score.', unit: 'score', category: 'score', chartable: true },
+  { id: 'sleep.period', resourceId: 'sleep', label: 'Sleep period', description: 'Sleep period identifier.', unit: 'period', category: 'quantity', chartable: true },
   { id: 'sleep.type', resourceId: 'sleep', label: 'Sleep type', description: 'Sleep type classification.', unit: 'type', category: 'ordinal', chartable: true, ordinalLabels: { 0: 'deleted', 1: 'rest', 2: 'sleep', 3: 'late_nap', 4: 'long_sleep' } },
+  { id: 'sleep.low_battery_alert', resourceId: 'sleep', label: 'Low battery alert', description: 'Low battery alert flag during sleep.', unit: 'flag', category: 'ordinal', chartable: false, ordinalLabels: { 0: 'false', 1: 'true' } },
+  { id: 'sleep.movement_30_sec', resourceId: 'sleep', label: 'Movement 30 sec', description: 'Thirty-second movement classification string.', unit: 'code', category: 'text', chartable: false },
+  { id: 'sleep.movement_30_sec_length', resourceId: 'sleep', label: 'Movement 30 sec length', description: 'Length of the 30-second movement classification string.', unit: 'count', category: 'quantity', chartable: false },
+  { id: 'sleep.sleep_phase_5_min', resourceId: 'sleep', label: 'Sleep phase 5 min', description: 'Five-minute sleep phase classification string.', unit: 'code', category: 'text', chartable: false },
+  { id: 'sleep.sleep_phase_5_min_length', resourceId: 'sleep', label: 'Sleep phase 5 min length', description: 'Length of the five-minute sleep phase string.', unit: 'count', category: 'quantity', chartable: false },
+  { id: 'sleep.sleep_algorithm_version', resourceId: 'sleep', label: 'Sleep algorithm version', description: 'Sleep analysis algorithm version.', unit: 'version', category: 'text', chartable: false },
+  { id: 'sleep.sleep_analysis_reason', resourceId: 'sleep', label: 'Sleep analysis reason', description: 'Reason provided for the sleep analysis.', unit: 'reason', category: 'text', chartable: false },
 ]
 
 const heartRateMetrics: MetricDefinition[] = [
   { id: 'heartrate.bpm', resourceId: 'heartrate', label: 'Heart rate', description: 'Heart rate samples.', unit: 'bpm', category: 'rate', chartable: true },
+  { id: 'heartrate.source', resourceId: 'heartrate', label: 'Heart rate source', description: 'Source classification for the sample.', unit: 'source', category: 'ordinal', chartable: false, ordinalLabels: { 1: 'awake', 2: 'rest', 3: 'sleep', 4: 'session', 5: 'live', 6: 'workout' } },
 ]
 
 const workoutMetrics: MetricDefinition[] = [
@@ -491,14 +604,70 @@ const workoutMetrics: MetricDefinition[] = [
   { id: 'workout.duration_minutes', resourceId: 'workout', label: 'Workout duration', description: 'Workout duration in minutes.', unit: 'min', category: 'duration', chartable: true },
   { id: 'workout.intensity', resourceId: 'workout', label: 'Workout intensity', description: 'Workout intensity classification.', unit: 'level', category: 'ordinal', chartable: true, ordinalLabels: { 1: 'easy', 2: 'moderate', 3: 'hard' } },
   { id: 'workout.source', resourceId: 'workout', label: 'Workout source', description: 'Workout source classification.', unit: 'source', category: 'ordinal', chartable: true, ordinalLabels: { 1: 'manual', 2: 'autodetected', 3: 'confirmed', 4: 'workout_heart_rate' } },
+  { id: 'workout.label', resourceId: 'workout', label: 'Workout label', description: 'Workout label text from Oura.', unit: 'label', category: 'text', chartable: false },
+  { id: 'workout.activity', resourceId: 'workout', label: 'Workout activity', description: 'Workout activity text from Oura.', unit: 'activity', category: 'text', chartable: false },
 ]
 
 const tagMetrics: MetricDefinition[] = [
   { id: 'tag.count', resourceId: 'tag', label: 'Tag count', description: 'Tag event count.', unit: 'count', category: 'event', chartable: true },
+  { id: 'tag.text', resourceId: 'tag', label: 'Tag text', description: 'Tag text value.', unit: 'text', category: 'text', chartable: false },
+  { id: 'tag.tags.count', resourceId: 'tag', label: 'Tag labels', description: 'Count of tag labels attached to the note.', unit: 'count', category: 'quantity', chartable: false },
 ]
 
 const enhancedTagMetrics: MetricDefinition[] = [
   { id: 'enhanced_tag.count', resourceId: 'enhanced_tag', label: 'Enhanced tag count', description: 'Enhanced tag event count.', unit: 'count', category: 'event', chartable: true },
+  { id: 'enhanced_tag.custom_name', resourceId: 'enhanced_tag', label: 'Enhanced tag name', description: 'Custom tag name.', unit: 'text', category: 'text', chartable: false },
+  { id: 'enhanced_tag.comment', resourceId: 'enhanced_tag', label: 'Enhanced tag comment', description: 'Additional tag comment.', unit: 'text', category: 'text', chartable: false },
+  { id: 'enhanced_tag.tag_type_code', resourceId: 'enhanced_tag', label: 'Enhanced tag type code', description: 'Selected tag type code.', unit: 'text', category: 'text', chartable: false },
+  { id: 'enhanced_tag.duration_minutes', resourceId: 'enhanced_tag', label: 'Enhanced tag duration', description: 'Duration of the enhanced tag in minutes.', unit: 'min', category: 'duration', chartable: false },
+]
+
+const sessionMetrics: MetricDefinition[] = [
+  { id: 'session.duration_minutes', resourceId: 'session', label: 'Session duration', description: 'Duration of the session in minutes.', unit: 'min', category: 'duration', chartable: true },
+  { id: 'session.type', resourceId: 'session', label: 'Session type', description: 'Session type classification.', unit: 'type', category: 'ordinal', chartable: true, ordinalLabels: { 1: 'breathing', 2: 'meditation', 3: 'nap', 4: 'relaxation', 5: 'rest', 6: 'body_status' } },
+  { id: 'session.mood', resourceId: 'session', label: 'Session mood', description: 'Session mood classification.', unit: 'mood', category: 'ordinal', chartable: true, ordinalLabels: { 1: 'bad', 2: 'worse', 3: 'same', 4: 'good', 5: 'great' } },
+  { id: 'session.heart_rate.mean', resourceId: 'session', label: 'Session heart rate mean', description: 'Mean heart rate across the session sample.', unit: 'bpm', category: 'rate', chartable: true },
+  { id: 'session.heart_rate.min', resourceId: 'session', label: 'Session heart rate min', description: 'Minimum heart rate across the session sample.', unit: 'bpm', category: 'rate', chartable: true },
+  { id: 'session.heart_rate.max', resourceId: 'session', label: 'Session heart rate max', description: 'Maximum heart rate across the session sample.', unit: 'bpm', category: 'rate', chartable: true },
+  { id: 'session.heart_rate.sample_count', resourceId: 'session', label: 'Session heart rate samples', description: 'Number of heart rate samples for the session.', unit: 'count', category: 'quantity', chartable: true },
+  { id: 'session.heart_rate.interval_seconds', resourceId: 'session', label: 'Session heart rate interval', description: 'Sampling interval for heart rate in seconds.', unit: 'sec', category: 'duration', chartable: true },
+  { id: 'session.heart_rate_variability.mean', resourceId: 'session', label: 'Session HRV mean', description: 'Mean HRV across the session sample.', unit: 'ms', category: 'quantity', chartable: true },
+  { id: 'session.heart_rate_variability.sample_count', resourceId: 'session', label: 'Session HRV samples', description: 'Number of HRV samples for the session.', unit: 'count', category: 'quantity', chartable: true },
+  { id: 'session.motion_count.mean', resourceId: 'session', label: 'Session motion count mean', description: 'Mean motion count across the session sample.', unit: 'count', category: 'quantity', chartable: true },
+  { id: 'session.motion_count.sample_count', resourceId: 'session', label: 'Session motion samples', description: 'Number of motion count samples for the session.', unit: 'count', category: 'quantity', chartable: true },
+]
+
+const sleepTimeMetrics: MetricDefinition[] = [
+  { id: 'sleep_time.optimal_bedtime.start_offset_minutes', resourceId: 'sleep_time', label: 'Optimal bedtime start', description: 'Optimal bedtime window start offset from midnight.', unit: 'min', category: 'quantity', chartable: true },
+  { id: 'sleep_time.optimal_bedtime.end_offset_minutes', resourceId: 'sleep_time', label: 'Optimal bedtime end', description: 'Optimal bedtime window end offset from midnight.', unit: 'min', category: 'quantity', chartable: true },
+  { id: 'sleep_time.optimal_bedtime.window_minutes', resourceId: 'sleep_time', label: 'Optimal bedtime window', description: 'Width of the optimal bedtime window.', unit: 'min', category: 'duration', chartable: true },
+  { id: 'sleep_time.optimal_bedtime.midpoint_minutes', resourceId: 'sleep_time', label: 'Optimal bedtime midpoint', description: 'Midpoint of the optimal bedtime window.', unit: 'min', category: 'quantity', chartable: true },
+  { id: 'sleep_time.optimal_bedtime.day_tz_seconds', resourceId: 'sleep_time', label: 'Optimal bedtime timezone offset', description: 'Timezone offset associated with the bedtime window.', unit: 'sec', category: 'quantity', chartable: false },
+  { id: 'sleep_time.recommendation', resourceId: 'sleep_time', label: 'Sleep time recommendation', description: 'Recommended action for bedtime.', unit: 'recommendation', category: 'ordinal', chartable: true, ordinalLabels: { 1: 'improve_efficiency', 2: 'earlier_bedtime', 3: 'later_bedtime', 4: 'earlier_wake_up_time', 5: 'later_wake_up_time', 6: 'follow_optimal_bedtime' } },
+  { id: 'sleep_time.status', resourceId: 'sleep_time', label: 'Sleep time status', description: 'Sleep time status.', unit: 'status', category: 'ordinal', chartable: true, ordinalLabels: { 1: 'not_enough_nights', 2: 'not_enough_recent_nights', 3: 'bad_sleep_quality', 4: 'only_recommended_found', 5: 'optimal_found' } },
+]
+
+const restModePeriodMetrics: MetricDefinition[] = [
+  { id: 'rest_mode_period.duration_days', resourceId: 'rest_mode_period', label: 'Rest mode duration', description: 'Duration of the rest mode period in days.', unit: 'day', category: 'duration', chartable: true },
+  { id: 'rest_mode_period.duration_hours', resourceId: 'rest_mode_period', label: 'Rest mode duration (hours)', description: 'Duration of the rest mode period in hours.', unit: 'hour', category: 'duration', chartable: true },
+  { id: 'rest_mode_period.episode_count', resourceId: 'rest_mode_period', label: 'Rest mode episodes', description: 'Number of rest mode episodes.', unit: 'count', category: 'quantity', chartable: true },
+  { id: 'rest_mode_period.tag_count', resourceId: 'rest_mode_period', label: 'Rest mode tags', description: 'Number of tags recorded across the rest mode period.', unit: 'count', category: 'quantity', chartable: true },
+]
+
+const personalInfoMetrics: MetricDefinition[] = [
+  { id: 'personal_info.age', resourceId: 'personal_info', label: 'Age', description: 'Reported age from the profile snapshot.', unit: 'years', category: 'quantity', chartable: false },
+  { id: 'personal_info.weight', resourceId: 'personal_info', label: 'Weight', description: 'Reported weight from the profile snapshot.', category: 'quantity', chartable: false },
+  { id: 'personal_info.height', resourceId: 'personal_info', label: 'Height', description: 'Reported height from the profile snapshot.', category: 'quantity', chartable: false },
+  { id: 'personal_info.biological_sex', resourceId: 'personal_info', label: 'Biological sex', description: 'Reported biological sex.', unit: 'text', category: 'text', chartable: false },
+  { id: 'personal_info.email', resourceId: 'personal_info', label: 'Email', description: 'Profile email address.', unit: 'text', category: 'text', chartable: false },
+]
+
+const ringConfigurationMetrics: MetricDefinition[] = [
+  { id: 'ring_configuration.size', resourceId: 'ring_configuration', label: 'Ring size', description: 'Ring size from the configuration snapshot.', category: 'quantity', chartable: false },
+  { id: 'ring_configuration.firmware_version', resourceId: 'ring_configuration', label: 'Firmware version', description: 'Ring firmware version.', unit: 'text', category: 'text', chartable: false },
+  { id: 'ring_configuration.color', resourceId: 'ring_configuration', label: 'Ring color', description: 'Ring color classification.', unit: 'text', category: 'text', chartable: false },
+  { id: 'ring_configuration.design', resourceId: 'ring_configuration', label: 'Ring design', description: 'Ring design classification.', unit: 'text', category: 'text', chartable: false },
+  { id: 'ring_configuration.hardware_type', resourceId: 'ring_configuration', label: 'Ring hardware type', description: 'Ring hardware classification.', unit: 'text', category: 'text', chartable: false },
 ]
 
 export const metricDefinitions: MetricDefinition[] = [
@@ -515,6 +684,11 @@ export const metricDefinitions: MetricDefinition[] = [
   ...workoutMetrics,
   ...tagMetrics,
   ...enhancedTagMetrics,
+  ...sessionMetrics,
+  ...sleepTimeMetrics,
+  ...restModePeriodMetrics,
+  ...personalInfoMetrics,
+  ...ringConfigurationMetrics,
 ]
 
 export const metricDefinitionsById = new Map(metricDefinitions.map((metric) => [metric.id, metric] as const))
@@ -530,8 +704,11 @@ export function defaultResourceIdsForChart(): string[] {
     'daily_sleep.score',
     'daily_activity.score',
     'daily_activity.steps',
+    'sleep.bedtime_start_minutes',
+    'sleep.bedtime_end_minutes',
     'sleep.total_sleep_duration',
     'sleep.average_heart_rate',
+    'sleep_time.optimal_bedtime.start_offset_minutes',
     'heartrate.bpm',
   ]
 }
@@ -717,14 +894,23 @@ export function formatMetricValue(metric: MetricDefinition, value: number | null
   if (metric.unit === 'min') {
     return `${Math.round(value)} min`
   }
+  if (metric.unit === 'hour') {
+    return `${formatMaybeNumber(value, value % 1 === 0 ? 0 : 1)} hour`
+  }
+  if (metric.unit === 'day') {
+    return `${formatMaybeNumber(value, value % 1 === 0 ? 0 : 1)} day`
+  }
   if (metric.unit === 'kcal') {
     return `${Math.round(value)} kcal`
   }
   if (metric.unit === 'steps' || metric.unit === 'count' || metric.unit === 'm' || metric.unit === 'years') {
     return `${formatMaybeNumber(value, value % 1 === 0 ? 0 : 1)} ${metric.unit}`
   }
-  if (metric.unit === 'bpm' || metric.unit === 'score' || metric.unit === '%') {
+  if (metric.unit === 'bpm' || metric.unit === 'score' || metric.unit === '%' || metric.unit === 'breaths/sec') {
     return `${formatMaybeNumber(value, value % 1 === 0 ? 0 : 1)} ${metric.unit}`
+  }
+  if (metric.unit === 'flag') {
+    return value ? 'true' : 'false'
   }
   return formatMaybeNumber(value)
 }
