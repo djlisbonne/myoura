@@ -1,107 +1,97 @@
-import type { MetricId, OuraDay } from '../data/oura'
-import { clamp, mean, standardDeviation } from './analytics'
+import type { ChartSeries } from './api'
 
 export type DisplayMode = 'raw' | 'normalized' | 'relative'
 export type AxisSide = 'left' | 'right'
 export type XAxisMode = 'date' | 'sequence'
 
 export interface OverlayPoint {
+  x: string
   dateLabel: string
   sequenceLabel: string
   index: number
-  raw: Record<MetricId, number>
-  normalized: Record<MetricId, number>
-  relative: Record<MetricId, number>
-  [key: string]: string | number | Record<MetricId, number>
+  raw: Record<string, number | null>
+  normalized: Record<string, number | null>
+  relative: Record<string, number | null>
+  [key: string]: string | number | null | Record<string, number | null>
 }
 
-function rawKey(metricId: MetricId) {
-  return `${metricId}__raw`
-}
+const rawKey = (metricId: string) => `${metricId}__raw`
+const normalizedKey = (metricId: string) => `${metricId}__normalized`
+const relativeKey = (metricId: string) => `${metricId}__relative`
 
-function normalizedKey(metricId: MetricId) {
-  return `${metricId}__normalized`
-}
-
-function relativeKey(metricId: MetricId) {
-  return `${metricId}__relative`
-}
-
-export function displayDataKey(metricId: MetricId, mode: DisplayMode) {
+export function displayDataKey(metricId: string, mode: DisplayMode) {
   if (mode === 'normalized') {
     return normalizedKey(metricId)
   }
-
   if (mode === 'relative') {
     return relativeKey(metricId)
   }
-
   return rawKey(metricId)
 }
 
-export function buildOverlayChartData(
-  records: OuraDay[],
-  selectedMetricIds: MetricId[],
-): OverlayPoint[] {
-  const selectedValues = selectedMetricIds.reduce<Record<MetricId, number[]>>(
-    (accumulator, metricId) => {
-      accumulator[metricId] = records.map((record) => record[metricId])
-      return accumulator
-    },
-    {} as Record<MetricId, number[]>,
-  )
+function labelForX(x: string, xType: 'day' | 'timestamp') {
+  const date = xType === 'day' ? new Date(`${x}T00:00:00`) : new Date(x)
+  if (Number.isNaN(date.getTime())) {
+    return x
+  }
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  })
+}
 
-  const normalizers = selectedMetricIds.reduce<Record<MetricId, { mean: number; spread: number }>>(
-    (accumulator, metricId) => {
-      const values = selectedValues[metricId]
-      accumulator[metricId] = {
-        mean: mean(values),
-        spread: standardDeviation(values) || 1,
-      }
-      return accumulator
-    },
-    {} as Record<MetricId, { mean: number; spread: number }>,
-  )
+function percentile(values: number[], value: number) {
+  if (values.length === 0) {
+    return null
+  }
+  const sorted = [...values].sort((left, right) => left - right)
+  const index = sorted.findIndex((entry) => entry >= value)
+  if (index < 0) {
+    return 1
+  }
+  return sorted.length === 1 ? 0.5 : index / (sorted.length - 1)
+}
 
-  const baselines = selectedMetricIds.reduce<Record<MetricId, number>>(
-    (accumulator, metricId) => {
-      accumulator[metricId] = records[0]?.[metricId] ?? 0
-      return accumulator
-    },
-    {} as Record<MetricId, number>,
-  )
+export function buildOverlayChartData(series: ChartSeries[]): OverlayPoint[] {
+  const metricIds = series.map((entry) => entry.metricId)
+  const seriesByMetric = new Map(series.map((entry) => [entry.metricId, entry] as const))
+  const xValues = [...new Set(series.flatMap((entry) => entry.points.map((point) => point.x)))].sort()
 
-  return records.map((record, index) => {
+  return xValues.map((x, index) => {
+    const referenceSeries = series.find((entry) => entry.points.some((point) => point.x === x))
     const point: OverlayPoint = {
-      dateLabel: new Date(`${record.date}T00:00:00`).toLocaleDateString(undefined, {
-        month: 'short',
-        day: 'numeric',
-      }),
+      x,
+      dateLabel: labelForX(x, referenceSeries?.xType ?? 'day'),
       sequenceLabel: `${index + 1}`,
       index,
-      raw: {} as Record<MetricId, number>,
-      normalized: {} as Record<MetricId, number>,
-      relative: {} as Record<MetricId, number>,
+      raw: {},
+      normalized: {},
+      relative: {},
     }
 
-    selectedMetricIds.forEach((metricId) => {
-      const value = record[metricId]
-      const normalizer = normalizers[metricId]
-      const baseline = baselines[metricId]
-      const normalized = clamp(
-        (value - normalizer.mean) / normalizer.spread,
-        -3.5,
-        3.5,
-      )
-      const relative = baseline === 0 ? 0 : ((value - baseline) / baseline) * 100
+    for (const metricId of metricIds) {
+      const metricSeries = seriesByMetric.get(metricId)
+      const seriesPoint = metricSeries?.points.find((entry) => entry.x === x)
+      const rawValue = seriesPoint?.value ?? null
+      const numericValues = metricSeries?.points
+        .map((entry) => entry.value)
+        .filter((value): value is number => typeof value === 'number' && Number.isFinite(value)) ?? []
+      const baseline = numericValues[0] ?? null
+      const normalized = typeof rawValue === 'number' ? percentile(numericValues, rawValue) : null
+      const relative =
+        typeof rawValue === 'number' && typeof baseline === 'number' && baseline !== 0
+          ? ((rawValue - baseline) / baseline) * 100
+          : typeof rawValue === 'number' && baseline === 0
+            ? 0
+            : null
 
-      point[rawKey(metricId)] = value
-      point[normalizedKey(metricId)] = normalized
-      point[relativeKey(metricId)] = relative
-      point.raw[metricId] = value
+      point.raw[metricId] = rawValue
       point.normalized[metricId] = normalized
       point.relative[metricId] = relative
-    })
+      point[rawKey(metricId)] = rawValue
+      point[normalizedKey(metricId)] = normalized
+      point[relativeKey(metricId)] = relative
+    }
 
     return point
   })

@@ -1,5 +1,3 @@
-import type { ChatContextSnapshot } from './analytics'
-
 interface ApiErrorPayload {
   ok?: boolean
   error?: string | { code?: string; message?: string }
@@ -23,9 +21,31 @@ export interface ChatMessage {
   content: string
 }
 
+export interface ChatRequestContext {
+  headline: string
+  windowLabel: string
+  selectedMetrics: Array<{
+    metricId: string
+    label: string
+    latest: string
+  }>
+  keyRelationships: Array<{
+    label: string
+    interpretation: string
+  }>
+  sourceLabels: string[]
+  notes: string[]
+  xAxisMode: 'date' | 'sequence'
+  displayMode: 'raw' | 'normalized' | 'relative'
+  axisAssignments: Array<{
+    metricId: string
+    axis: 'left' | 'right' | 'off'
+  }>
+}
+
 export interface ChatRequest {
   message: string
-  context: ChatContextSnapshot
+  context: ChatRequestContext
   messages: ChatMessage[]
 }
 
@@ -35,22 +55,97 @@ export interface ChatResponse {
 }
 
 export interface OuraAuthStatus {
-  hasPersonalAccessToken: boolean
   hasClientCredentials: boolean
+  hasPersonalAccessToken: boolean
   connected: boolean
+  authMode?: 'oauth' | 'pat' | 'none'
   expiresAt?: string
   scope?: string
   responseType?: 'code' | 'token'
   redirectUri?: string
 }
 
+export interface SourceMetricView {
+  metricId: string
+  label: string
+  description: string
+  unit?: string
+  category: string
+  chartable: boolean
+  pointCount: number
+  latestAt: string | null
+  latestValue: number | null
+  latestTextValue?: string | null
+  min: number | null
+  max: number | null
+  mean: number | null
+}
+
+export interface SourceGroupView {
+  resourceId: string
+  label: string
+  description: string
+  kind: 'daily' | 'intraday' | 'event' | 'profile'
+  path: string
+  chartable: boolean
+  documentCount: number
+  metricCount: number
+  latestAt: string | null
+  metrics: SourceMetricView[]
+}
+
+export interface ChartPoint {
+  x: string
+  xType: 'day' | 'timestamp'
+  value: number | null
+  normalizedValue: number | null
+  textValue?: string | null
+  unit?: string
+  meta?: Record<string, unknown>
+}
+
+export interface ChartSeries {
+  metricId: string
+  resourceId: string
+  label: string
+  description: string
+  category: string
+  unit?: string
+  xType: 'day' | 'timestamp'
+  pointCount: number
+  stats: {
+    min: number | null
+    max: number | null
+    mean: number | null
+    latest: number | null
+  }
+  points: ChartPoint[]
+}
+
+interface SourcesResponse {
+  ok: true
+  range: {
+    startDate: string
+    endDate: string
+  }
+  sources: SourceGroupView[]
+  chartableMetricIds: string[]
+}
+
+interface ChartResponse {
+  ok: true
+  range: {
+    startDate: string
+    endDate: string
+  }
+  normalize: boolean
+  metricIds: string[]
+  series: ChartSeries[]
+  emptyState?: string
+}
+
 async function readJsonResponse(response: Response) {
   const payload = (await response.json().catch(() => null)) as ApiErrorPayload | null
-
-  if (!payload) {
-    return null
-  }
-
   return payload
 }
 
@@ -81,7 +176,6 @@ async function requestJson<T>(url: string, init: RequestInit): Promise<ApiResult
     })
 
     const payload = await readJsonResponse(response)
-
     if (!response.ok) {
       return {
         ok: false,
@@ -115,7 +209,7 @@ function buildDemoReply(request: ChatRequest) {
     opening,
     relation,
     `Your prompt: "${request.message}"`,
-    'If you connect the chat API, the same context payload will be posted to `/api/chat` automatically.',
+    'If you connect the chat API, the same screen context will be posted to `/api/chat` automatically.',
   ].join(' ')
 }
 
@@ -145,74 +239,8 @@ export async function sendChat(request: ChatRequest): Promise<ChatResponse> {
   }
 
   return {
-    reply: response?.message
-      ? `${response.message} ${buildDemoReply(request)}`
-      : buildDemoReply(request),
+    reply: response?.message ? `${response.message} ${buildDemoReply(request)}` : buildDemoReply(request),
     mode: 'demo',
-  }
-}
-
-export async function syncOuraData() {
-  const response = await requestJson<ApiErrorPayload>('/api/sync', {
-    method: 'POST',
-  })
-
-  if (response?.ok) {
-    return {
-      ok: true,
-      mode: 'api' as const,
-      data: response.data,
-      message: response.data?.message ?? 'Sync completed.',
-    }
-  }
-
-  return {
-    ok: true,
-    mode: 'demo' as const,
-    data: null,
-    message: response?.message ?? 'Demo sync completed locally.',
-  }
-}
-
-export async function importOuraFile(file: File) {
-  try {
-    const text = await file.text()
-
-    const response = await fetch('/api/import', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        filename: file.name,
-        text,
-      }),
-    })
-
-    const payload = (await readJsonResponse(response)) ?? {}
-
-    if (!response.ok) {
-      return {
-        ok: true,
-        mode: 'demo' as const,
-        data: null,
-        message: extractErrorMessage(payload, `Import endpoint returned ${response.status}`),
-      }
-    }
-
-    return {
-      ok: true,
-      mode: 'api' as const,
-      data: payload,
-      message: payload.message ?? `Imported ${file.name}`,
-    }
-  } catch {
-    return {
-      ok: true,
-      mode: 'demo' as const,
-      data: null,
-      message: `Import failed locally, so ${file.name} was not loaded into the API store.`,
-    }
   }
 }
 
@@ -280,146 +308,48 @@ export async function completeOuraTokenAuthFromHash() {
   return null
 }
 
-interface ChartPoint {
-  x: string
-  value: number | null
-}
-
-interface ChartSeries {
-  metricId: string
-  points: ChartPoint[]
-}
-
-interface ChartResponse {
-  series: ChartSeries[]
-}
-
-const liveMetricMap = {
-  readiness: 'daily_readiness.score',
-  sleepScore: 'daily_sleep.score',
-  sleepEfficiency: 'sleep.efficiency',
-  hrv: 'sleep.average_hrv',
-  restingHeartRate: 'sleep.lowest_heart_rate',
-  steps: 'daily_activity.steps',
-  strain: 'daily_activity.score',
-  bedtimeConsistency: 'sleep.bedtime_start_minutes',
-  bodyTempDelta: 'daily_readiness.temperature_deviation',
-} as const
-
-const requestedLiveMetricIds = [...new Set(Object.values(liveMetricMap))]
-
-function parseDayKey(value: string) {
-  return value.slice(0, 10)
-}
-
-function computeBedtimeConsistency(values: Array<number | null>) {
-  return values.map((value, index) => {
-    if (value === null) {
-      return null
-    }
-
-    const window = values.slice(Math.max(0, index - 6), index + 1).filter((entry): entry is number => entry !== null)
-    if (window.length === 0) {
-      return null
-    }
-
-    const average = window.reduce((sum, entry) => sum + entry, 0) / window.length
-    return Math.abs(value - average)
+export async function fetchSources(lookbackDays: number) {
+  const response = await requestJson<SourcesResponse>(`/api/sources?lookbackDays=${lookbackDays}`, {
+    method: 'GET',
   })
+
+  return response?.ok ? response.data : null
 }
 
-export async function loadDashboardRecords(lookbackDays: number) {
-  const health = await probeHealth()
-  if (!health.connected) {
+export async function fetchChart(metricIds: string[], lookbackDays: number) {
+  if (metricIds.length === 0) {
     return null
   }
 
-  if (health.documentCount === 0) {
-    await fetch('/api/demo', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ days: Math.max(lookbackDays, 60), replace: true }),
-    })
-  }
-
   const params = new URLSearchParams({
-    lookbackDays: String(Math.max(lookbackDays, 14)),
-    metricIds: requestedLiveMetricIds.join(','),
+    lookbackDays: String(lookbackDays),
+    metricIds: metricIds.join(','),
   })
+
   const response = await requestJson<ChartResponse>(`/api/chart?${params.toString()}`, {
     method: 'GET',
   })
 
-  if (!response?.ok) {
-    return null
-  }
+  return response?.ok ? response.data : null
+}
 
-  const dayMap = new Map<string, Partial<Record<string, number>>>()
-  for (const series of response.data.series) {
-    for (const point of series.points) {
-      if (typeof point.value !== 'number' || !Number.isFinite(point.value)) {
-        continue
-      }
+export async function syncOuraData() {
+  const response = await requestJson<{ message?: string; authMode?: string }>('/api/sync', {
+    method: 'POST',
+    body: JSON.stringify({ replace: false }),
+  })
 
-      const day = parseDayKey(point.x)
-      const current = dayMap.get(day) ?? {}
-      current[series.metricId] = point.value
-      dayMap.set(day, current)
+  if (response?.ok) {
+    return {
+      ok: true,
+      mode: 'api' as const,
+      message: response.data?.message ?? 'Sync completed.',
     }
   }
 
-  const orderedDays = [...dayMap.keys()].sort()
-  const bedtimeValues = orderedDays.map((day) => dayMap.get(day)?.['sleep.bedtime_start_minutes'] ?? null)
-  const bedtimeConsistency = computeBedtimeConsistency(bedtimeValues)
-
-  const records = orderedDays
-    .map((day, index) => {
-      const values = dayMap.get(day) ?? {}
-      const readiness = values[liveMetricMap.readiness]
-      const sleepScore = values[liveMetricMap.sleepScore]
-      const sleepEfficiency = values[liveMetricMap.sleepEfficiency]
-      const hrv = values[liveMetricMap.hrv]
-      const restingHeartRate = values[liveMetricMap.restingHeartRate]
-      const steps = values[liveMetricMap.steps]
-      const strain = values[liveMetricMap.strain]
-      const bodyTempDelta = values[liveMetricMap.bodyTempDelta]
-      const bedtime = bedtimeConsistency[index]
-
-      if (
-        [readiness, sleepScore, sleepEfficiency, hrv, restingHeartRate, steps, strain, bodyTempDelta, bedtime].some(
-          (value) => typeof value !== 'number' || !Number.isFinite(value),
-        )
-      ) {
-        return null
-      }
-
-      return {
-        date: day,
-        readiness,
-        sleepScore,
-        sleepEfficiency,
-        hrv,
-        restingHeartRate,
-        steps,
-        strain,
-        bedtimeConsistency: bedtime,
-        bodyTempDelta,
-      }
-    })
-    .filter((record): record is {
-      date: string
-      readiness: number
-      sleepScore: number
-      sleepEfficiency: number
-      hrv: number
-      restingHeartRate: number
-      steps: number
-      strain: number
-      bedtimeConsistency: number
-      bodyTempDelta: number
-    } => record !== null)
-
-  return records
+  return {
+    ok: true,
+    mode: 'demo' as const,
+    message: response?.message ?? 'Sync failed. Check Oura authorization state.',
+  }
 }

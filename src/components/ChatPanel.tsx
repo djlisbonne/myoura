@@ -43,7 +43,7 @@ export function ChatPanel({
         <div className="chat-panel__context-metrics">
           {context.selectedMetrics.map((metric) => (
             <span key={metric.metricId} className="context-chip">
-              {metric.label}: {metric.value}
+              {metric.label}: {metric.latest}
             </span>
           ))}
         </div>
@@ -79,4 +79,3 @@ export function ChatPanel({
     </div>
   )
 }
-

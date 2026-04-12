@@ -1,66 +1,81 @@
-import { useEffect, useMemo, useRef, useState, useTransition, type ChangeEvent } from 'react'
-import { Search } from 'lucide-react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import './App.css'
 import { ChatPanel } from './components/ChatPanel'
+import { MetricBrowser } from './components/MetricBrowser'
 import { OverlayChart } from './components/OverlayChart'
+import { SleepTimingPanel, type SleepTimingMode } from './components/SleepTimingPanel'
 import { SyncControls } from './components/SyncControls'
 import {
-  demoOuraSeries,
+  buildMetricCatalog,
   defaultSelectedMetricIds,
-  metricCatalog,
+  formatMetricValue,
+  metricPresets,
   rangeOptions,
-  type MetricId,
+  type MetricDefinition,
 } from './data/oura'
+import { buildChatContext, computePairwiseRelationships } from './lib/analytics'
 import {
-  buildChatContext,
-  computePairwiseRelationships,
-} from './lib/analytics'
-import {
-  importOuraFile,
   completeOuraTokenAuthFromHash,
-  loadDashboardRecords,
+  fetchChart,
+  fetchSources,
   probeHealth,
   sendChat,
   startOuraOAuth,
   syncOuraData,
+  type ChartSeries,
+  type ChatMessage,
   type OuraAuthStatus,
+  type SourceGroupView,
 } from './lib/api'
-import type { ChatMessage } from './lib/api'
-import {
-  buildOverlayChartData,
-  type AxisSide,
-  type DisplayMode,
-  type XAxisMode,
-} from './lib/chart'
+import { type AxisSide, type DisplayMode, type XAxisMode } from './lib/chart'
+
+const sleepTimingMetricIds = [
+  'sleep.bedtime_start_minutes',
+  'sleep.bedtime_end_minutes',
+  'sleep.bedtime_duration_minutes',
+  'sleep_time.optimal_bedtime.start_offset_minutes',
+  'sleep_time.optimal_bedtime.end_offset_minutes',
+  'sleep.total_sleep_duration_minutes',
+  'sleep.time_in_bed_minutes',
+]
 
 const daysLabel = (days: number) => `${days}d`
 
-function sliceWindow(days: number) {
-  return demoOuraSeries.slice(-days)
+function defaultAxisForMetric(metric: MetricDefinition): AxisSide {
+  if (metric.metricId.includes('bedtime') || metric.metricId.includes('duration') || metric.unit === 'min' || metric.unit === 'sec') {
+    return 'right'
+  }
+  return 'left'
 }
 
-function defaultAxisMap() {
-  return metricCatalog.reduce<Record<MetricId, AxisSide | 'off'>>((accumulator, metric) => {
-    accumulator[metric.id] = defaultSelectedMetricIds.includes(metric.id)
-      ? ['readiness', 'sleepScore', 'steps', 'strain'].includes(metric.id)
-        ? 'left'
-        : 'right'
-      : 'off'
+function buildAxisMap(metrics: MetricDefinition[], metricIds: string[]) {
+  return metrics.reduce<Record<string, AxisSide | 'off'>>((accumulator, metric) => {
+    accumulator[metric.metricId] = metricIds.includes(metric.metricId) ? defaultAxisForMetric(metric) : 'off'
     return accumulator
-  }, {} as Record<MetricId, AxisSide | 'off'>)
+  }, {})
+}
+
+function detectPreset(presets: ReturnType<typeof metricPresets>, selectedMetricIds: string[]) {
+  const selected = [...selectedMetricIds].sort().join('|')
+  return presets.find((preset) => [...preset.metricIds].sort().join('|') === selected)?.id ?? 'custom'
+}
+
+function sourceLabelsForSelection(groups: SourceGroupView[], selectedMetricIds: string[]) {
+  return groups
+    .filter((group) => group.metrics.some((metric) => selectedMetricIds.includes(metric.metricId)))
+    .map((group) => group.label)
 }
 
 function App() {
-  const [metricAxisMap, setMetricAxisMap] = useState<Record<MetricId, AxisSide | 'off'>>(defaultAxisMap)
   const [selectedWindow, setSelectedWindow] = useState(30)
   const [displayMode, setDisplayMode] = useState<DisplayMode>('raw')
   const [xAxisMode, setXAxisMode] = useState<XAxisMode>('date')
   const [metricQuery, setMetricQuery] = useState('')
+  const [sleepTimingMode, setSleepTimingMode] = useState<SleepTimingMode>('bedtime')
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
-      content:
-        'Ask about the metrics in view. The chart configuration and selected series are sent with every prompt.',
+      content: 'Ask about the metrics in view. The visible chart state is injected with each prompt.',
     },
   ])
   const [chatInput, setChatInput] = useState('')
@@ -68,9 +83,12 @@ function App() {
   const [isBusy, setIsBusy] = useState(false)
   const [apiMode, setApiMode] = useState<'api' | 'demo'>('demo')
   const [syncStatus, setSyncStatus] = useState('Connecting to local API...')
-  const [records, setRecords] = useState(() => sliceWindow(30))
+  const [sources, setSources] = useState<SourceGroupView[]>([])
+  const [mainSeries, setMainSeries] = useState<ChartSeries[]>([])
+  const [sleepTimingSeries, setSleepTimingSeries] = useState<ChartSeries[]>([])
+  const [selectedMetricIds, setSelectedMetricIds] = useState<string[]>([])
+  const [metricAxisMap, setMetricAxisMap] = useState<Record<string, AxisSide | 'off'>>({})
   const [ouraAuth, setOuraAuth] = useState<OuraAuthStatus | undefined>()
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     let active = true
@@ -88,32 +106,35 @@ function App() {
       const params = new URLSearchParams(window.location.search)
       const authResult = params.get('oura')
       const authReason = params.get('reason')
-      if (tokenAuthResult?.connected) {
-        setSyncStatus('Oura access token captured locally. Sync is now available.')
-        return
-      }
-      if (authResult === 'connected') {
-        setSyncStatus('Oura account connected locally. Sync whenever you want to pull fresh data.')
-        window.history.replaceState({}, '', window.location.pathname)
-        return
-      }
-      if (authResult === 'error') {
-        setSyncStatus(`Oura connection failed: ${authReason ?? 'unknown error'}`)
+
+      if (tokenAuthResult?.connected || authResult === 'connected') {
+        setSyncStatus('Oura access token captured locally. Sync now will pull live V2 resources.')
         window.history.replaceState({}, '', window.location.pathname)
         return
       }
 
-      setSyncStatus(
-        result.connected
-          ? result.documentCount > 0
-            ? 'Local API reachable. Chart is using stored Oura data.'
-            : result.ouraAuth?.connected || result.ouraAuth?.hasPersonalAccessToken
-              ? 'Local API reachable. Auth is ready; sync when you want live data.'
-              : result.ouraAuth?.hasClientCredentials
-                ? 'Local API reachable. Use Connect Oura to enable live sync.'
-                : 'Local API reachable. Running on demo data until you connect or import.'
-          : 'Local API unavailable. The app is running on demo data.',
-      )
+      if (authResult === 'error') {
+        setSyncStatus(`Oura authorization failed: ${authReason ?? 'unknown error'}`)
+        window.history.replaceState({}, '', window.location.pathname)
+        return
+      }
+
+      if (!result.connected) {
+        setSyncStatus('Local API unavailable. The interface is not connected to the server.')
+        return
+      }
+
+      if (result.ouraAuth?.connected) {
+        setSyncStatus('Local API reachable. OAuth token is stored and sync is available.')
+        return
+      }
+
+      if (result.ouraAuth?.hasClientCredentials) {
+        setSyncStatus('Local API reachable. OAuth app is configured, but no user token is stored yet.')
+        return
+      }
+
+      setSyncStatus('Local API reachable. Oura OAuth app credentials are not configured.')
     })()
 
     return () => {
@@ -125,19 +146,13 @@ function App() {
     let active = true
 
     void (async () => {
-      const liveRecords = await loadDashboardRecords(selectedWindow)
-      if (!active) {
+      const sourceResponse = await fetchSources(selectedWindow)
+      if (!active || !sourceResponse) {
         return
       }
 
-      if (liveRecords && liveRecords.length > 0) {
-        setRecords(liveRecords)
-        setApiMode('api')
-        return
-      }
-
-      setRecords(sliceWindow(selectedWindow))
-      setApiMode('demo')
+      setSources(sourceResponse.sources)
+      setApiMode('api')
     })()
 
     return () => {
@@ -145,52 +160,145 @@ function App() {
     }
   }, [selectedWindow])
 
-  const activeRecords = useMemo(() => records, [records])
-  const visibleMetricIds = useMemo(
-    () => metricCatalog
-      .map((metric) => metric.id)
-      .filter((metricId) => metricAxisMap[metricId] !== 'off'),
-    [metricAxisMap],
+  const metricCatalog = useMemo(() => buildMetricCatalog(sources), [sources])
+  const chartableMetrics = useMemo(() => metricCatalog.filter((metric) => metric.chartable), [metricCatalog])
+  const metricMap = useMemo(() => new Map(metricCatalog.map((metric) => [metric.metricId, metric] as const)), [metricCatalog])
+  const availableMetricIds = useMemo(() => chartableMetrics.map((metric) => metric.metricId), [chartableMetrics])
+  const presets = useMemo(() => metricPresets(availableMetricIds), [availableMetricIds])
+
+  useEffect(() => {
+    if (availableMetricIds.length === 0) {
+      setSelectedMetricIds([])
+      setMetricAxisMap({})
+      return
+    }
+
+    setSelectedMetricIds((current) => {
+      const next = current.filter((metricId) => availableMetricIds.includes(metricId))
+      return next.length > 0 ? next : defaultSelectedMetricIds(availableMetricIds)
+    })
+  }, [availableMetricIds])
+
+  useEffect(() => {
+    if (chartableMetrics.length === 0 || selectedMetricIds.length === 0) {
+      return
+    }
+
+    setMetricAxisMap((current) => {
+      const next = { ...buildAxisMap(chartableMetrics, selectedMetricIds), ...current }
+      for (const metric of chartableMetrics) {
+        if (!(metric.metricId in next)) {
+          next[metric.metricId] = 'off'
+        }
+        if (selectedMetricIds.includes(metric.metricId) && next[metric.metricId] === 'off') {
+          next[metric.metricId] = defaultAxisForMetric(metric)
+        }
+      }
+      return next
+    })
+  }, [chartableMetrics, selectedMetricIds])
+
+  useEffect(() => {
+    let active = true
+
+    void (async () => {
+      if (selectedMetricIds.length === 0) {
+        setMainSeries([])
+        return
+      }
+
+      const response = await fetchChart(selectedMetricIds, selectedWindow)
+      if (!active || !response) {
+        return
+      }
+
+      setMainSeries(response.series)
+      setApiMode('api')
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [selectedMetricIds, selectedWindow])
+
+  useEffect(() => {
+    let active = true
+
+    void (async () => {
+      const requested = sleepTimingMetricIds.filter((metricId) => availableMetricIds.includes(metricId))
+      if (requested.length === 0) {
+        setSleepTimingSeries([])
+        return
+      }
+
+      const response = await fetchChart(requested, selectedWindow)
+      if (!active || !response) {
+        return
+      }
+
+      setSleepTimingSeries(response.series)
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [availableMetricIds, selectedWindow])
+
+  const filteredMetrics = useMemo(() => {
+    const query = metricQuery.trim().toLowerCase()
+    if (!query) {
+      return chartableMetrics
+    }
+
+    return chartableMetrics.filter((metric) =>
+      [metric.label, metric.category, metric.metricId, metric.resourceLabel, metric.unit ?? '', metric.description]
+        .some((value) => value.toLowerCase().includes(query)),
+    )
+  }, [chartableMetrics, metricQuery])
+
+  const visibleSeries = useMemo(
+    () => mainSeries.filter((entry) => selectedMetricIds.includes(entry.metricId) && metricAxisMap[entry.metricId] !== 'off'),
+    [mainSeries, metricAxisMap, selectedMetricIds],
   )
-  const chartData = useMemo(
-    () => buildOverlayChartData(activeRecords, visibleMetricIds),
-    [activeRecords, visibleMetricIds],
-  )
-  const relationships = useMemo(
-    () => computePairwiseRelationships(activeRecords, visibleMetricIds),
-    [activeRecords, visibleMetricIds],
-  )
+
+  const visibleMetricIds = useMemo(() => visibleSeries.map((entry) => entry.metricId), [visibleSeries])
+  const activePresetId = useMemo(() => detectPreset(presets, visibleMetricIds), [presets, visibleMetricIds])
+  const relationships = useMemo(() => computePairwiseRelationships(visibleSeries, metricMap), [metricMap, visibleSeries])
+  const sourceLabels = useMemo(() => sourceLabelsForSelection(sources, visibleMetricIds), [sources, visibleMetricIds])
   const chatContext = useMemo(
     () => ({
-      ...buildChatContext(activeRecords, visibleMetricIds, relationships, daysLabel(selectedWindow)),
+      ...buildChatContext(visibleSeries, metricMap, relationships, daysLabel(selectedWindow), sourceLabels),
       xAxisMode,
       displayMode,
       axisAssignments: visibleMetricIds.map((metricId) => ({
         metricId,
-        axis: metricAxisMap[metricId],
+        axis: metricAxisMap[metricId] ?? 'off',
       })),
     }),
-    [activeRecords, displayMode, metricAxisMap, relationships, selectedWindow, visibleMetricIds, xAxisMode],
+    [displayMode, metricAxisMap, metricMap, relationships, selectedWindow, sourceLabels, visibleMetricIds, visibleSeries, xAxisMode],
   )
-  const filteredMetrics = useMemo(() => {
-    const query = metricQuery.trim().toLowerCase()
-    if (!query) {
-      return metricCatalog
+
+  const handleMetricAxisChange = (metricId: string, axis: AxisSide | 'off') => {
+    startTransition(() => {
+      setMetricAxisMap((current) => ({ ...current, [metricId]: axis }))
+      setSelectedMetricIds((current) => {
+        if (axis === 'off') {
+          return current.filter((entry) => entry !== metricId)
+        }
+        return current.includes(metricId) ? current : [...current, metricId]
+      })
+    })
+  }
+
+  const handlePresetChange = (presetId: string) => {
+    const preset = presets.find((entry) => entry.id === presetId)
+    if (!preset) {
+      return
     }
 
-    return metricCatalog.filter((metric) =>
-      [metric.label, metric.category, metric.unit, metric.description].some((value) =>
-        value.toLowerCase().includes(query),
-      ),
-    )
-  }, [metricQuery])
-
-  const handleMetricAxisChange = (metricId: MetricId, axis: AxisSide | 'off') => {
     startTransition(() => {
-      setMetricAxisMap((current) => ({
-        ...current,
-        [metricId]: axis,
-      }))
+      setSelectedMetricIds(preset.metricIds)
+      setMetricAxisMap(buildAxisMap(chartableMetrics, preset.metricIds))
     })
   }
 
@@ -214,96 +322,71 @@ function App() {
 
       setMessages((current) => [...current, { role: 'assistant', content: response.reply }])
       setApiMode(response.mode)
-      setSyncStatus(
-        response.mode === 'api'
-          ? 'Chat request sent to `/api/chat`.'
-          : 'Chat API missing, so the answer was generated from the visible demo context.',
-      )
+      setSyncStatus(response.mode === 'api' ? 'Chat request sent to `/api/chat`.' : 'Chat fell back to local context only.')
     } finally {
       setIsBusy(false)
+    }
+  }
+
+  const refreshData = async () => {
+    const [health, sourceResponse] = await Promise.all([probeHealth(), fetchSources(selectedWindow)])
+    setOuraAuth(health.ouraAuth)
+    setApiMode(health.mode)
+    if (sourceResponse) {
+      setSources(sourceResponse.sources)
     }
   }
 
   const handleSync = async () => {
     setIsBusy(true)
-
     try {
       const result = await syncOuraData()
       setApiMode(result.mode)
       setSyncStatus(result.message ?? 'Sync request completed.')
-      const liveRecords = await loadDashboardRecords(selectedWindow)
-      if (liveRecords && liveRecords.length > 0) {
-        setRecords(liveRecords)
-      }
+      await refreshData()
     } finally {
       setIsBusy(false)
     }
   }
 
-  const handleImportClick = () => {
-    fileInputRef.current?.click()
-  }
-
-  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    event.target.value = ''
-
-    if (!file) {
-      return
-    }
-
-    setIsBusy(true)
-
-    try {
-      const result = await importOuraFile(file)
-      setApiMode(result.mode)
-      setSyncStatus(result.message ?? `Imported ${file.name}.`)
-      const liveRecords = await loadDashboardRecords(selectedWindow)
-      if (liveRecords && liveRecords.length > 0) {
-        setRecords(liveRecords)
-      }
-    } finally {
-      setIsBusy(false)
-    }
-  }
-
+  const latestRelationship = relationships[0]
   const leftCount = visibleMetricIds.filter((metricId) => metricAxisMap[metricId] === 'left').length
   const rightCount = visibleMetricIds.filter((metricId) => metricAxisMap[metricId] === 'right').length
-  const latestRelationship = relationships[0]
-  const canSyncOura = Boolean(ouraAuth?.connected || ouraAuth?.hasPersonalAccessToken)
+  const latestMetrics = visibleSeries
+    .slice(0, 4)
+    .map((entry) => {
+      const metric = metricMap.get(entry.metricId)
+      const latestPoint = [...entry.points].reverse().find((point) => point.value !== null || point.textValue)
+      if (!metric || !latestPoint) {
+        return null
+      }
+      return {
+        metricId: entry.metricId,
+        label: metric.label,
+        value: formatMetricValue(metric, latestPoint.value, latestPoint.textValue),
+      }
+    })
+    .filter((entry): entry is { metricId: string; label: string; value: string } => Boolean(entry))
 
   return (
     <div className="app-shell">
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".json"
-        className="sr-only"
-        onChange={handleImportFile}
-      />
-
       <header className="topbar">
         <div className="topbar__intro">
           <span className="topbar__eyebrow">Oura Local</span>
-          <h1>Compose the view, keep the data central.</h1>
+          <h1>Compose any Oura metrics in one view.</h1>
           <p>
-            Browse metrics, assign axes, and switch between raw values, normalized overlays, and relative movement
-            without leaving the chart.
+            The metric list now comes from the OpenAPI-backed local API model, so the interface can browse and overlay the broader
+            V2 resource set instead of a fixed hand-picked dashboard.
           </p>
         </div>
 
         <SyncControls
           onSync={handleSync}
-          onImportClick={handleImportClick}
-          onConnectOura={startOuraOAuth}
-          showConnectOura={Boolean(!ouraAuth?.connected && !ouraAuth?.hasPersonalAccessToken && ouraAuth?.hasClientCredentials)}
-          syncDisabled={!canSyncOura}
+          onAuthorize={startOuraOAuth}
+          syncDisabled={!ouraAuth?.connected}
           apiMode={apiMode}
-          statusText={
-            !canSyncOura && ouraAuth?.hasClientCredentials
-              ? 'Client ID and secret are configured, but Oura still requires a user access token before sync can run.'
-              : syncStatus
-          }
+          statusText={syncStatus}
+          auth={ouraAuth}
           busy={isBusy}
         />
       </header>
@@ -313,7 +396,7 @@ function App() {
           <section className="control-block">
             <div className="control-block__header">
               <span className="control-label">X-axis</span>
-              <span className="control-hint">Change the horizontal read.</span>
+              <span className="control-hint">Date or sequence index.</span>
             </div>
             <div className="segmented-control">
               {(['date', 'sequence'] as const).map((mode) => (
@@ -332,7 +415,7 @@ function App() {
           <section className="control-block">
             <div className="control-block__header">
               <span className="control-label">Units</span>
-              <span className="control-hint">Switch between absolute and comparative views.</span>
+              <span className="control-hint">Absolute or comparative overlays.</span>
             </div>
             <div className="segmented-control segmented-control--stacked">
               {(['raw', 'normalized', 'relative'] as const).map((mode) => (
@@ -342,7 +425,7 @@ function App() {
                   className={`segment ${displayMode === mode ? 'segment--active' : ''}`}
                   onClick={() => setDisplayMode(mode)}
                 >
-                  {mode === 'raw' ? 'Raw' : mode === 'normalized' ? 'Relative units' : 'Percent from baseline'}
+                  {mode === 'raw' ? 'Raw units' : mode === 'normalized' ? 'Relative units' : 'Percent from baseline'}
                 </button>
               ))}
             </div>
@@ -351,7 +434,7 @@ function App() {
           <section className="control-block">
             <div className="control-block__header">
               <span className="control-label">Window</span>
-              <span className="control-hint">{activeRecords.length} samples loaded.</span>
+              <span className="control-hint">{sources.reduce((sum, group) => sum + group.documentCount, 0)} documents loaded.</span>
             </div>
             <div className="segmented-control">
               {rangeOptions.map((option) => (
@@ -367,55 +450,18 @@ function App() {
             </div>
           </section>
 
-          <section className="control-block control-block--metrics">
-            <div className="control-block__header">
-              <span className="control-label">Metric browser</span>
-              <span className="control-hint">{visibleMetricIds.length} in chart</span>
-            </div>
-
-            <label className="search-input">
-              <Search size={15} />
-              <input
-                value={metricQuery}
-                onChange={(event) => setMetricQuery(event.target.value)}
-                placeholder="Search metrics, units, categories"
-              />
-            </label>
-
-            <div className="metric-list">
-              {filteredMetrics.map((metric) => {
-                const axis = metricAxisMap[metric.id]
-                return (
-                  <article className="metric-row" key={metric.id}>
-                    <div className="metric-row__meta">
-                      <span className="metric-dot" style={{ backgroundColor: metric.color }} />
-                      <div>
-                        <div className="metric-row__topline">
-                          <strong>{metric.label}</strong>
-                          <span>{metric.unit}</span>
-                        </div>
-                        <p>{metric.description}</p>
-                        <small>{metric.category}</small>
-                      </div>
-                    </div>
-                    <div className="metric-axis-picker">
-                      {(['off', 'left', 'right'] as const).map((side) => (
-                        <button
-                          key={side}
-                          type="button"
-                          className={`axis-chip ${axis === side ? 'axis-chip--active' : ''}`}
-                          onClick={() => handleMetricAxisChange(metric.id, side)}
-                          disabled={isPending}
-                        >
-                          {side === 'off' ? 'Off' : side === 'left' ? 'Left' : 'Right'}
-                        </button>
-                      ))}
-                    </div>
-                  </article>
-                )
-              })}
-            </div>
-          </section>
+          <MetricBrowser
+            metrics={filteredMetrics}
+            selectedMetricIds={visibleMetricIds}
+            axisByMetric={metricAxisMap}
+            presets={presets}
+            activePresetId={activePresetId}
+            query={metricQuery}
+            onQueryChange={setMetricQuery}
+            onAxisChange={handleMetricAxisChange}
+            onPresetChange={handlePresetChange}
+            busy={isPending || isBusy}
+          />
         </aside>
 
         <section className="chart-pane">
@@ -431,12 +477,30 @@ function App() {
             </div>
           </div>
 
+          {latestMetrics.length > 0 ? (
+            <div className="metric-browser__selected-list">
+              {latestMetrics.map((metric) => (
+                <span key={metric.metricId} className="metric-pill metric-pill--active">
+                  <strong>{metric.label}</strong>
+                  <span>{metric.value}</span>
+                </span>
+              ))}
+            </div>
+          ) : null}
+
           <OverlayChart
-            chartData={chartData}
-            visibleMetricIds={visibleMetricIds}
+            series={visibleSeries}
+            metricMap={metricMap}
             axisByMetric={metricAxisMap}
             displayMode={displayMode}
             xAxisMode={xAxisMode}
+          />
+
+          <SleepTimingPanel
+            mode={sleepTimingMode}
+            onModeChange={setSleepTimingMode}
+            series={sleepTimingSeries}
+            metricMap={metricMap}
           />
 
           <div className="chart-pane__footnote">

@@ -1,7 +1,7 @@
 .app-shell {
   width: min(1500px, 100%);
   margin: 0 auto;
-  padding: 24px;
+  padding: 20px;
   box-sizing: border-box;
 }
 
@@ -12,11 +12,14 @@
 .sync-controls,
 .metric-row,
 .chart-shell,
-.chart-empty {
+.chart-empty,
+.metric-browser,
+.metric-group,
+.sleep-timing-panel {
   border: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(7, 16, 27, 0.72);
   box-shadow:
-    0 24px 80px rgba(2, 8, 23, 0.25),
+    0 24px 80px rgba(2, 8, 23, 0.22),
     inset 0 1px 0 rgba(255, 255, 255, 0.03);
   backdrop-filter: blur(18px);
 }
@@ -26,7 +29,7 @@
   grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
   gap: 18px;
   align-items: start;
-  padding: 16px 18px;
+  padding: 14px 16px;
   border-radius: 24px;
 }
 
@@ -38,20 +41,25 @@
 .chart-pane__stats,
 .metric-row p,
 .metric-row small,
-.chart-pane__footnote p {
+.chart-pane__footnote p,
+.sleep-timing-panel__eyebrow,
+.sleep-timing-panel__note,
+.metric-browser__selected-header {
   color: rgba(148, 163, 184, 0.88);
 }
 
 .topbar__eyebrow,
 .control-label,
-.chart-shell__label {
+.chart-shell__label,
+.sleep-timing-panel__eyebrow {
   font-size: 0.74rem;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
 .topbar__intro h1,
-.chart-pane__header h2 {
+.chart-pane__header h2,
+.sleep-timing-panel__header h3 {
   margin: 10px 0 8px;
   letter-spacing: -0.05em;
 }
@@ -71,9 +79,9 @@
 
 .workspace {
   display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
-  gap: 18px;
-  margin-top: 18px;
+  grid-template-columns: 380px minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 16px;
 }
 
 .controls-pane,
@@ -83,9 +91,9 @@
 }
 
 .controls-pane {
-  padding: 18px;
+  padding: 16px;
   display: grid;
-  gap: 18px;
+  gap: 16px;
   align-self: start;
 }
 
@@ -140,7 +148,9 @@
 .segment:hover,
 .axis-chip:hover,
 .secondary-button:hover,
-.primary-button:hover {
+.primary-button:hover,
+.preset-chip:hover,
+.metric-pill:hover {
   border-color: rgba(125, 211, 252, 0.45);
   transform: translateY(-1px);
 }
@@ -149,6 +159,11 @@
 .axis-chip--active {
   background: linear-gradient(135deg, rgba(34, 211, 238, 0.2), rgba(125, 211, 252, 0.1));
   border-color: rgba(125, 211, 252, 0.45);
+}
+
+.axis-chip--ghost {
+  border-style: dashed;
+  background: rgba(15, 23, 42, 0.56);
 }
 
 .search-input {
@@ -171,19 +186,125 @@
   font: inherit;
 }
 
-.metric-list {
+.metric-browser {
+  display: grid;
+  gap: 12px;
+}
+
+.preset-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.preset-chip {
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.84);
+  color: rgba(226, 232, 240, 0.88);
+  border-radius: 18px;
+  padding: 12px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.preset-chip strong {
+  color: rgba(241, 245, 249, 0.96);
+  font-size: 0.95rem;
+}
+
+.preset-chip span {
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.preset-chip--active {
+  border-color: rgba(125, 211, 252, 0.5);
+  background: linear-gradient(135deg, rgba(14, 116, 144, 0.28), rgba(8, 145, 178, 0.16));
+}
+
+.metric-browser__selected {
   display: grid;
   gap: 10px;
-  max-height: 54vh;
+}
+
+.metric-browser__selected-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 0.84rem;
+}
+
+.metric-browser__selected-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.metric-browser__empty {
+  color: rgba(148, 163, 184, 0.76);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.metric-browser__groups {
+  display: grid;
+  gap: 10px;
+  max-height: 48vh;
   overflow: auto;
   padding-right: 4px;
 }
 
-.metric-row {
+.metric-group {
   border-radius: 18px;
-  padding: 14px;
-  display: grid;
+  overflow: hidden;
+  background: rgba(7, 16, 27, 0.4);
+}
+
+.metric-group > summary {
+  list-style: none;
+}
+
+.metric-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.metric-group__summary {
+  padding: 12px 14px;
+  display: flex;
+  justify-content: space-between;
   gap: 12px;
+  align-items: center;
+  cursor: pointer;
+  color: rgba(241, 245, 249, 0.96);
+}
+
+.metric-group__summary strong {
+  display: block;
+  font-size: 0.96rem;
+}
+
+.metric-group__summary span {
+  color: rgba(148, 163, 184, 0.84);
+  font-size: 0.82rem;
+}
+
+.metric-group__summary-note {
+  white-space: nowrap;
+}
+
+.metric-group__metrics {
+  padding: 0 10px 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.metric-row {
+  border-radius: 16px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
 }
 
 .metric-row__meta {
@@ -224,14 +345,57 @@
   line-height: 1.45;
 }
 
+.metric-row small {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(148, 163, 184, 0.72);
+}
+
 .metric-axis-picker {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
 
+.metric-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(15, 23, 42, 0.84);
+  color: rgba(241, 245, 249, 0.96);
+  cursor: pointer;
+}
+
+.metric-pill--active {
+  border-color: color-mix(in srgb, var(--metric-color) 42%, rgba(125, 211, 252, 0.4));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--metric-color) 20%, rgba(15, 23, 42, 0.9)), rgba(15, 23, 42, 0.86));
+}
+
+.metric-pill__index,
+.metric-pill__axis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  background: rgba(2, 6, 23, 0.45);
+  color: rgba(148, 163, 184, 0.94);
+}
+
+.metric-pill__axis {
+  min-width: 20px;
+}
+
 .chart-pane {
-  padding: 18px;
+  padding: 16px;
   display: grid;
   gap: 16px;
 }
@@ -295,7 +459,7 @@
 }
 
 .chart-shell__canvas {
-  height: 540px;
+  height: 460px;
 }
 
 .chart-shell__footer {
@@ -332,12 +496,6 @@
   color: rgba(226, 232, 240, 0.9);
 }
 
-.chart-tooltip__secondary {
-  grid-column: 2 / span 2;
-  color: rgba(148, 163, 184, 0.8);
-  font-size: 0.82rem;
-}
-
 .chart-empty {
   border-radius: 22px;
   padding: 40px 28px;
@@ -356,8 +514,81 @@
   line-height: 1.55;
 }
 
+.sleep-timing-panel {
+  border-radius: 22px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.sleep-timing-panel__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.sleep-timing-panel__header h3 {
+  margin: 8px 0 8px;
+  font-size: 1.08rem;
+  letter-spacing: -0.03em;
+}
+
+.sleep-timing-panel__header p {
+  margin: 0;
+  max-width: 58ch;
+  color: rgba(226, 232, 240, 0.84);
+  line-height: 1.5;
+}
+
+.sleep-timing-panel__stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.timing-chip {
+  display: inline-grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.84);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  min-width: 112px;
+}
+
+.timing-chip strong {
+  font-size: 0.76rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(148, 163, 184, 0.84);
+}
+
+.timing-chip span {
+  color: rgba(241, 245, 249, 0.96);
+  font-weight: 600;
+}
+
+.sleep-timing-panel__modes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sleep-timing-panel__note {
+  margin: 0;
+  color: rgba(148, 163, 184, 0.84);
+  line-height: 1.45;
+  font-size: 0.9rem;
+}
+
+.sleep-timing-panel__chart {
+  height: 260px;
+}
+
 .chat-section {
-  margin-top: 18px;
+  margin-top: 16px;
 }
 
 .chat-panel {
@@ -559,10 +790,21 @@
   }
 
   .chart-shell__meta,
+  .chart-shell__footer,
   .chart-pane__header,
-  .chat-panel__header {
+  .chat-panel__header,
+  .sleep-timing-panel__header {
     flex-direction: column;
-    align-items: start;
+  }
+
+  .chart-shell__legend,
+  .sleep-timing-panel__stats,
+  .chart-pane__stats {
+    justify-content: flex-start;
+  }
+
+  .preset-strip {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -571,21 +813,27 @@
     padding: 14px;
   }
 
+  .topbar,
   .controls-pane,
   .chart-pane,
-  .topbar {
-    padding: 14px;
+  .chat-panel,
+  .sleep-timing-panel {
+    border-radius: 20px;
   }
 
   .chart-shell__canvas {
     height: 380px;
   }
 
-  .chart-shell__footer {
-    flex-direction: column;
+  .sleep-timing-panel__chart {
+    height: 230px;
   }
 
-  .metric-list {
-    max-height: none;
+  .chat-panel__history {
+    max-height: 260px;
+  }
+
+  .metric-browser__groups {
+    max-height: 42vh;
   }
 }

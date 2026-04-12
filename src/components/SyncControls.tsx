@@ -1,26 +1,27 @@
-import { FileDown, Link2, RefreshCw, ShieldCheck } from 'lucide-react'
+import { RefreshCw, ShieldCheck } from 'lucide-react'
+import type { OuraAuthStatus } from '../lib/api'
 
 interface SyncControlsProps {
   onSync: () => void
-  onImportClick: () => void
-  onConnectOura?: () => void
-  showConnectOura?: boolean
+  onAuthorize: () => void
   syncDisabled?: boolean
   apiMode: 'api' | 'demo'
   statusText: string
+  auth?: OuraAuthStatus
   busy?: boolean
 }
 
 export function SyncControls({
   onSync,
-  onImportClick,
-  onConnectOura,
-  showConnectOura,
+  onAuthorize,
   syncDisabled,
   apiMode,
   statusText,
+  auth,
   busy,
 }: SyncControlsProps) {
+  const needsAuth = auth?.hasClientCredentials && !auth?.connected
+
   return (
     <div className="sync-controls">
       <div className="sync-controls__status">
@@ -32,16 +33,11 @@ export function SyncControls({
       </div>
 
       <div className="sync-controls__actions">
-        {showConnectOura ? (
-          <button type="button" className="secondary-button" onClick={onConnectOura} disabled={busy}>
-            <Link2 size={15} />
+        {needsAuth ? (
+          <button type="button" className="secondary-button" onClick={onAuthorize} disabled={busy}>
             Authorize Oura
           </button>
         ) : null}
-        <button type="button" className="secondary-button" onClick={onImportClick} disabled={busy}>
-          <FileDown size={15} />
-          Import export
-        </button>
         <button type="button" className="primary-button" onClick={onSync} disabled={busy || syncDisabled}>
           <RefreshCw size={15} />
           Sync now

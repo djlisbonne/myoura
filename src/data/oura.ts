@@ -1,241 +1,227 @@
-import { format, subDays } from 'date-fns'
+import type { SourceGroupView, SourceMetricView } from '../lib/api'
 
-export type MetricCategory =
-  | 'Recovery'
-  | 'Sleep'
-  | 'Activity'
-  | 'Physiology'
+export type MetricId = string
+export type AxisSide = 'left' | 'right'
 
-export interface MetricDefinition {
+export interface MetricDefinition extends SourceMetricView {
+  resourceLabel: string
+  resourceKind: SourceGroupView['kind']
+  color: string
+}
+
+export interface MetricPreset {
   id: string
   label: string
-  unit: string
-  category: MetricCategory
-  color: string
   description: string
-  precision?: number
+  metricIds: string[]
 }
 
-export const metricCatalog = [
-  {
-    id: 'readiness',
-    label: 'Readiness',
-    unit: 'score',
-    category: 'Recovery',
-    color: '#7dd3fc',
-    description: 'Composite recovery signal from overnight biometrics and sleep.',
-    precision: 0,
-  },
-  {
-    id: 'sleepScore',
-    label: 'Sleep score',
-    unit: 'score',
-    category: 'Sleep',
-    color: '#86efac',
-    description: 'Oura sleep quality score across duration, efficiency, and timing.',
-    precision: 0,
-  },
-  {
-    id: 'sleepEfficiency',
-    label: 'Sleep efficiency',
-    unit: '%',
-    category: 'Sleep',
-    color: '#fbbf24',
-    description: 'Fraction of time in bed spent asleep.',
-    precision: 0,
-  },
-  {
-    id: 'hrv',
-    label: 'HRV',
-    unit: 'ms',
-    category: 'Recovery',
-    color: '#a78bfa',
-    description: 'Nightly heart rate variability, a recovery and stress proxy.',
-    precision: 0,
-  },
-  {
-    id: 'restingHeartRate',
-    label: 'Resting HR',
-    unit: 'bpm',
-    category: 'Physiology',
-    color: '#fb7185',
-    description: 'Lowest nightly resting heart rate.',
-    precision: 0,
-  },
-  {
-    id: 'steps',
-    label: 'Steps',
-    unit: 'steps',
-    category: 'Activity',
-    color: '#22d3ee',
-    description: 'Total daily steps accumulated during the day.',
-    precision: 0,
-  },
-  {
-    id: 'strain',
-    label: 'Strain',
-    unit: 'score',
-    category: 'Activity',
-    color: '#f97316',
-    description: 'Load from activity, recovery impact, and duration.',
-    precision: 1,
-  },
-  {
-    id: 'bedtimeConsistency',
-    label: 'Bedtime consistency',
-    unit: 'min',
-    category: 'Sleep',
-    color: '#c084fc',
-    description: 'Spread of bedtime timing over the recent window.',
-    precision: 0,
-  },
-  {
-    id: 'bodyTempDelta',
-    label: 'Temperature delta',
-    unit: '°C',
-    category: 'Physiology',
-    color: '#fda4af',
-    description: 'Deviation from personal baseline.',
-    precision: 2,
-  },
-] as const satisfies readonly MetricDefinition[]
-
-export type MetricId = (typeof metricCatalog)[number]['id']
-
-export interface OuraDay {
-  date: string
-  readiness: number
-  sleepScore: number
-  sleepEfficiency: number
-  hrv: number
-  restingHeartRate: number
-  steps: number
-  strain: number
-  bedtimeConsistency: number
-  bodyTempDelta: number
-}
-
-export const defaultSelectedMetricIds: MetricId[] = [
-  'readiness',
-  'sleepScore',
-  'sleepEfficiency',
-  'hrv',
+const palette = [
+  '#7dd3fc',
+  '#86efac',
+  '#c084fc',
+  '#f59e0b',
+  '#fb7185',
+  '#22d3ee',
+  '#a78bfa',
+  '#f97316',
+  '#60a5fa',
+  '#14b8a6',
+  '#f472b6',
+  '#38bdf8',
+  '#34d399',
+  '#fca5a5',
+  '#fcd34d',
+  '#818cf8',
+  '#2dd4bf',
+  '#fb923c',
 ]
 
-export const rangeOptions = [7, 14, 30, 60] as const
-
-const clamp = (value: number, min: number, max: number) =>
-  Math.min(max, Math.max(min, value))
-
-const seededNoise = (index: number, salt: number) => {
-  const raw = Math.sin(index * 12.9898 + salt * 78.233) * 43758.5453
-  return raw - Math.floor(raw) - 0.5
+function hashMetric(metricId: string) {
+  let hash = 0
+  for (let index = 0; index < metricId.length; index += 1) {
+    hash = (hash * 31 + metricId.charCodeAt(index)) >>> 0
+  }
+  return hash
 }
 
-export function createDemoOuraSeries(days = 60): OuraDay[] {
-  const today = new Date()
+export function metricColor(metricId: string) {
+  return palette[hashMetric(metricId) % palette.length]
+}
 
-  return Array.from({ length: days }, (_, index) => {
-    const dayIndex = days - 1 - index
-    const day = subDays(today, dayIndex)
-    const wave = Math.sin(index / 6.1)
-    const weekly = Math.cos(index / 3.5)
-    const stressSpike = index % 15 === 11 ? 1.6 : 0
-    const recoveryLift = index % 12 === 4 ? 1.1 : 0
+export function buildMetricCatalog(groups: SourceGroupView[]): MetricDefinition[] {
+  return groups
+    .flatMap((group) =>
+      group.metrics.map((metric) => ({
+        ...metric,
+        resourceLabel: group.label,
+        resourceKind: group.kind,
+        color: metricColor(metric.metricId),
+      })),
+    )
+    .sort((left, right) => {
+      if (left.chartable !== right.chartable) {
+        return left.chartable ? -1 : 1
+      }
+      return left.label.localeCompare(right.label)
+    })
+}
 
-    const strain = clamp(
-      8.3 + wave * 1.3 + weekly * 0.5 + stressSpike + seededNoise(index, 1) * 0.9,
-      4.2,
-      16.2,
-    )
-    const sleepEfficiency = clamp(
-      86.5 - wave * 3.8 + recoveryLift + seededNoise(index, 2) * 2.4,
-      68,
-      98,
-    )
-    const sleepScore = clamp(
-      78 + sleepEfficiency * 0.22 + recoveryLift * 2.4 - strain * 0.55 + seededNoise(index, 3) * 5,
-      58,
-      97,
-    )
-    const hrv = clamp(
-      54 + (sleepEfficiency - 84) * 0.9 - strain * 1.35 + recoveryLift * 5 + seededNoise(index, 4) * 4.3,
-      28,
-      104,
-    )
-    const restingHeartRate = clamp(
-      57.5 - (sleepEfficiency - 84) * 0.17 + strain * 0.42 - recoveryLift * 0.9 + seededNoise(index, 5) * 1.7,
-      47,
-      68,
-    )
-    const readiness = clamp(
-      74 + (sleepScore - 76) * 0.38 + (hrv - 50) * 0.27 - (restingHeartRate - 56) * 1.7 - (strain - 8) * 1.3 + seededNoise(index, 6) * 3.7,
-      36,
-      99,
-    )
-    const steps = Math.round(
-      clamp(
-        7600 + wave * 1200 + weekly * 850 + (strain - 8) * 420 + seededNoise(index, 7) * 950,
-        2200,
-        16800,
-      ),
-    )
-    const bedtimeConsistency = clamp(
-      34 - weekly * 6 - recoveryLift * 5 + seededNoise(index, 8) * 3.2,
-      8,
-      58,
-    )
-    const bodyTempDelta = clamp(
-      (strain - 8.2) * 0.05 - (sleepEfficiency - 85) * 0.018 + seededNoise(index, 9) * 0.035,
-      -0.42,
-      0.42,
-    )
+function hasMetric(metricIds: string[], metricId: string) {
+  return metricIds.includes(metricId)
+}
 
-    return {
-      date: format(day, 'yyyy-MM-dd'),
-      readiness,
-      sleepScore,
-      sleepEfficiency,
-      hrv,
-      restingHeartRate,
-      steps,
-      strain,
-      bedtimeConsistency,
-      bodyTempDelta,
-    }
+export function metricPresets(metricIds: string[]): MetricPreset[] {
+  const presets: MetricPreset[] = []
+
+  if (
+    hasMetric(metricIds, 'daily_readiness.score') &&
+    hasMetric(metricIds, 'daily_sleep.score') &&
+    hasMetric(metricIds, 'sleep.average_hrv') &&
+    hasMetric(metricIds, 'sleep.lowest_heart_rate')
+  ) {
+    presets.push({
+      id: 'recovery',
+      label: 'Recovery',
+      description: 'Readiness, sleep, HRV, and lowest nightly heart rate.',
+      metricIds: ['daily_readiness.score', 'daily_sleep.score', 'sleep.average_hrv', 'sleep.lowest_heart_rate'],
+    })
+  }
+
+  if (
+    hasMetric(metricIds, 'sleep.bedtime_start_minutes') &&
+    hasMetric(metricIds, 'sleep.bedtime_end_minutes') &&
+    hasMetric(metricIds, 'sleep.total_sleep_duration_minutes') &&
+    hasMetric(metricIds, 'sleep_time.optimal_bedtime.start_offset_minutes')
+  ) {
+    presets.push({
+      id: 'sleep-timing',
+      label: 'Sleep timing',
+      description: 'Bedtime, wake timing, sleep duration, and recommended bedtime.',
+      metricIds: [
+        'sleep.bedtime_start_minutes',
+        'sleep.bedtime_end_minutes',
+        'sleep.total_sleep_duration_minutes',
+        'sleep_time.optimal_bedtime.start_offset_minutes',
+      ],
+    })
+  }
+
+  if (
+    hasMetric(metricIds, 'daily_activity.steps') &&
+    hasMetric(metricIds, 'daily_activity.score') &&
+    hasMetric(metricIds, 'daily_activity.active_calories')
+  ) {
+    presets.push({
+      id: 'activity',
+      label: 'Activity',
+      description: 'Steps, activity score, and active calories.',
+      metricIds: ['daily_activity.steps', 'daily_activity.score', 'daily_activity.active_calories'],
+    })
+  }
+
+  if (
+    hasMetric(metricIds, 'daily_stress.stress_high') &&
+    hasMetric(metricIds, 'daily_stress.recovery_high') &&
+    hasMetric(metricIds, 'daily_resilience.level')
+  ) {
+    presets.push({
+      id: 'stress',
+      label: 'Stress',
+      description: 'Stress load, recovery time, and resilience level.',
+      metricIds: ['daily_stress.stress_high', 'daily_stress.recovery_high', 'daily_resilience.level'],
+    })
+  }
+
+  return presets
+}
+
+export function defaultSelectedMetricIds(availableMetricIds: string[]) {
+  const defaults = [
+    'daily_readiness.score',
+    'daily_sleep.score',
+    'daily_activity.steps',
+    'sleep.bedtime_start_minutes',
+    'sleep.total_sleep_duration_minutes',
+    'sleep_time.optimal_bedtime.start_offset_minutes',
+  ]
+
+  const selected = defaults.filter((metricId) => availableMetricIds.includes(metricId))
+  return selected.length > 0 ? selected : availableMetricIds.slice(0, 6)
+}
+
+export const rangeOptions = [14, 30, 60, 90]
+
+function formatCompactNumber(value: number, maximumFractionDigits = 1) {
+  return Intl.NumberFormat('en-US', {
+    notation: Math.abs(value) >= 1000 ? 'compact' : 'standard',
+    maximumFractionDigits,
+  }).format(value)
+}
+
+export function formatClockMinutes(value: number) {
+  const normalized = ((value % 1440) + 1440) % 1440
+  const hours = Math.floor(normalized / 60)
+  const minutes = Math.round(normalized % 60)
+  return new Date(Date.UTC(2026, 0, 1, hours, minutes)).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
   })
 }
 
-export const demoOuraSeries = createDemoOuraSeries()
-
-export function getMetricDefinition(metricId: MetricId) {
-  return metricCatalog.find((metric) => metric.id === metricId)!
+export function formatDurationMinutes(value: number) {
+  const hours = Math.floor(value / 60)
+  const minutes = Math.round(value % 60)
+  if (hours <= 0) {
+    return `${minutes}m`
+  }
+  return `${hours}h ${minutes}m`
 }
 
-export function getMetricValue(day: OuraDay, metricId: MetricId) {
-  return day[metricId]
-}
-
-export function formatMetricValue(metricId: MetricId, value: number) {
-  const definition = getMetricDefinition(metricId)
-  const precision = definition.precision ?? 0
-
-  if (definition.unit === 'steps') {
-    return value.toLocaleString()
+export function formatMetricValue(metric: Pick<MetricDefinition, 'metricId' | 'unit' | 'category'>, value: number | null, textValue?: string | null) {
+  if (value === null || !Number.isFinite(value)) {
+    return textValue ?? '—'
   }
 
-  if (definition.unit === '%') {
-    return `${value.toFixed(precision)}%`
+  if (metric.metricId.includes('bedtime') && metric.unit === 'min') {
+    return formatClockMinutes(value)
   }
 
-  if (definition.unit === '°C') {
-    return `${value.toFixed(precision)}°`
+  if (metric.metricId.includes('duration') && metric.unit === 'min') {
+    return formatDurationMinutes(value)
   }
 
-  return `${value.toFixed(precision)} ${definition.unit}`
-}
+  if (metric.metricId.includes('duration') && metric.unit === 'sec') {
+    return formatDurationMinutes(value / 60)
+  }
 
-export function latestRecord(series: OuraDay[]) {
-  return series[series.length - 1] ?? null
-}
+  if (metric.unit === 'score') {
+    return `${Math.round(value)}`
+  }
 
+  if (metric.unit === '%' || metric.unit === 'percent') {
+    return `${value.toFixed(1)}%`
+  }
+
+  if (metric.unit === 'bpm' || metric.unit === 'ms' || metric.unit === 'count' || metric.unit === 'steps') {
+    return `${formatCompactNumber(value, 0)} ${metric.unit}`.trim()
+  }
+
+  if (metric.unit === 'kcal' || metric.unit === 'm' || metric.unit === 'ml/kg/min' || metric.unit === 'years') {
+    return `${formatCompactNumber(value)} ${metric.unit}`.trim()
+  }
+
+  if (metric.unit === 'min') {
+    return `${formatCompactNumber(value)} min`
+  }
+
+  if (metric.unit === 'sec') {
+    return `${formatCompactNumber(value)} sec`
+  }
+
+  if (metric.unit) {
+    return `${formatCompactNumber(value)} ${metric.unit}`.trim()
+  }
+
+  return formatCompactNumber(value)
+}
