@@ -1,30 +1,36 @@
 import { useEffect, useMemo, useRef, useState, useTransition, type ChangeEvent } from 'react'
-import { Activity, BrainCircuit, ChevronRight, Clock3, Layers3, LoaderCircle, MoonStar, Radar, HeartPulse } from 'lucide-react'
+import { Search } from 'lucide-react'
 import './App.css'
 import { ChatPanel } from './components/ChatPanel'
-import { MetricComposer } from './components/MetricComposer'
 import { OverlayChart } from './components/OverlayChart'
-import { Panel } from './components/Panel'
-import { RelationshipPanel } from './components/RelationshipPanel'
-import { SummaryCards } from './components/SummaryCards'
 import { SyncControls } from './components/SyncControls'
 import {
   demoOuraSeries,
   defaultSelectedMetricIds,
-  formatMetricValue,
-  getMetricDefinition,
   metricCatalog,
   rangeOptions,
   type MetricId,
 } from './data/oura'
 import {
   buildChatContext,
-  computeMetricDeltas,
   computePairwiseRelationships,
 } from './lib/analytics'
-import { importOuraFile, loadDashboardRecords, probeHealth, sendChat, startOuraOAuth, syncOuraData, type OuraAuthStatus } from './lib/api'
+import {
+  importOuraFile,
+  loadDashboardRecords,
+  probeHealth,
+  sendChat,
+  startOuraOAuth,
+  syncOuraData,
+  type OuraAuthStatus,
+} from './lib/api'
 import type { ChatMessage } from './lib/api'
-import { buildOverlayChartData } from './lib/chart'
+import {
+  buildOverlayChartData,
+  type AxisSide,
+  type DisplayMode,
+  type XAxisMode,
+} from './lib/chart'
 
 const daysLabel = (days: number) => `${days}d`
 
@@ -32,16 +38,28 @@ function sliceWindow(days: number) {
   return demoOuraSeries.slice(-days)
 }
 
+function defaultAxisMap() {
+  return metricCatalog.reduce<Record<MetricId, AxisSide | 'off'>>((accumulator, metric) => {
+    accumulator[metric.id] = defaultSelectedMetricIds.includes(metric.id)
+      ? ['readiness', 'sleepScore', 'steps', 'strain'].includes(metric.id)
+        ? 'left'
+        : 'right'
+      : 'off'
+    return accumulator
+  }, {} as Record<MetricId, AxisSide | 'off'>)
+}
+
 function App() {
-  const [selectedMetricIds, setSelectedMetricIds] = useState<MetricId[]>(
-    defaultSelectedMetricIds,
-  )
+  const [metricAxisMap, setMetricAxisMap] = useState<Record<MetricId, AxisSide | 'off'>>(defaultAxisMap)
   const [selectedWindow, setSelectedWindow] = useState(30)
+  const [displayMode, setDisplayMode] = useState<DisplayMode>('raw')
+  const [xAxisMode, setXAxisMode] = useState<XAxisMode>('date')
+  const [metricQuery, setMetricQuery] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
       content:
-        'Ask me to compare recovery, sleep, and activity. I will receive the dashboard context automatically.',
+        'Ask about the metrics in view. The chart configuration and selected series are sent with every prompt.',
     },
   ])
   const [chatInput, setChatInput] = useState('')
@@ -64,10 +82,11 @@ function App() {
       setApiMode(result.mode)
       setOuraAuth(result.ouraAuth)
 
-      const authResult = new URLSearchParams(window.location.search).get('oura')
-      const authReason = new URLSearchParams(window.location.search).get('reason')
+      const params = new URLSearchParams(window.location.search)
+      const authResult = params.get('oura')
+      const authReason = params.get('reason')
       if (authResult === 'connected') {
-        setSyncStatus('Oura account connected locally. You can sync your ring data now.')
+        setSyncStatus('Oura account connected locally. Sync whenever you want to pull fresh data.')
         window.history.replaceState({}, '', window.location.pathname)
         return
       }
@@ -80,13 +99,13 @@ function App() {
       setSyncStatus(
         result.connected
           ? result.documentCount > 0
-            ? 'Local API reachable. Stored Oura data is ready for the dashboard.'
+            ? 'Local API reachable. Chart is using stored Oura data.'
             : result.ouraAuth?.connected || result.ouraAuth?.hasPersonalAccessToken
-              ? 'Local API reachable. Connect complete; sync when you are ready.'
+              ? 'Local API reachable. Auth is ready; sync when you want live data.'
               : result.ouraAuth?.hasClientCredentials
-                ? 'Local API reachable. Connect your Oura account to enable live sync.'
-                : 'Local API reachable. Seeding demo data until you sync or import your own history.'
-          : 'Local API unavailable. The dashboard is running on demo data.',
+                ? 'Local API reachable. Use Connect Oura to enable live sync.'
+                : 'Local API reachable. Running on demo data until you connect or import.'
+          : 'Local API unavailable. The app is running on demo data.',
       )
     })
 
@@ -107,7 +126,6 @@ function App() {
       if (liveRecords && liveRecords.length > 0) {
         setRecords(liveRecords)
         setApiMode('api')
-        setSyncStatus('Dashboard is rendering from the local API store.')
         return
       }
 
@@ -121,56 +139,56 @@ function App() {
   }, [selectedWindow])
 
   const activeRecords = useMemo(() => records, [records])
-  const selectedMetrics = useMemo(
-    () => selectedMetricIds.map((metricId) => getMetricDefinition(metricId)),
-    [selectedMetricIds],
+  const visibleMetricIds = useMemo(
+    () => metricCatalog
+      .map((metric) => metric.id)
+      .filter((metricId) => metricAxisMap[metricId] !== 'off'),
+    [metricAxisMap],
   )
   const chartData = useMemo(
-    () => buildOverlayChartData(activeRecords, selectedMetricIds),
-    [activeRecords, selectedMetricIds],
-  )
-  const metricDeltas = useMemo(
-    () => computeMetricDeltas(activeRecords, ['readiness', 'sleepScore', 'hrv', 'restingHeartRate']),
-    [activeRecords],
+    () => buildOverlayChartData(activeRecords, visibleMetricIds),
+    [activeRecords, visibleMetricIds],
   )
   const relationships = useMemo(
-    () => computePairwiseRelationships(activeRecords, selectedMetricIds),
-    [activeRecords, selectedMetricIds],
+    () => computePairwiseRelationships(activeRecords, visibleMetricIds),
+    [activeRecords, visibleMetricIds],
   )
   const chatContext = useMemo(
-    () => buildChatContext(activeRecords, selectedMetricIds, relationships, daysLabel(selectedWindow)),
-    [activeRecords, relationships, selectedMetricIds, selectedWindow],
+    () => ({
+      ...buildChatContext(activeRecords, visibleMetricIds, relationships, daysLabel(selectedWindow)),
+      xAxisMode,
+      displayMode,
+      axisAssignments: visibleMetricIds.map((metricId) => ({
+        metricId,
+        axis: metricAxisMap[metricId],
+      })),
+    }),
+    [activeRecords, displayMode, metricAxisMap, relationships, selectedWindow, visibleMetricIds, xAxisMode],
   )
+  const filteredMetrics = useMemo(() => {
+    const query = metricQuery.trim().toLowerCase()
+    if (!query) {
+      return metricCatalog
+    }
 
-  const currentRecord = activeRecords.at(-1)
-  const recoveryHeadline = currentRecord
-    ? `${formatMetricValue('readiness', currentRecord.readiness)} readiness, ${formatMetricValue(
-        'sleepScore',
-        currentRecord.sleepScore,
-      )} sleep, ${formatMetricValue('hrv', currentRecord.hrv)} HRV`
-    : 'No data loaded'
+    return metricCatalog.filter((metric) =>
+      [metric.label, metric.category, metric.unit, metric.description].some((value) =>
+        value.toLowerCase().includes(query),
+      ),
+    )
+  }, [metricQuery])
 
-  const topRelationship = relationships[0]
-
-  const handleToggleMetric = (metricId: MetricId) => {
+  const handleMetricAxisChange = (metricId: MetricId, axis: AxisSide | 'off') => {
     startTransition(() => {
-      setSelectedMetricIds((current) => {
-        if (current.includes(metricId)) {
-          if (current.length === 1) {
-            return current
-          }
-
-          return current.filter((entry) => entry !== metricId)
-        }
-
-        return [...current, metricId]
-      })
+      setMetricAxisMap((current) => ({
+        ...current,
+        [metricId]: axis,
+      }))
     })
   }
 
   const handleSendChat = async () => {
     const prompt = chatInput.trim()
-
     if (!prompt) {
       return
     }
@@ -192,7 +210,7 @@ function App() {
       setSyncStatus(
         response.mode === 'api'
           ? 'Chat request sent to `/api/chat`.'
-          : 'Chat API missing, so the assistant answered from the local demo context.',
+          : 'Chat API missing, so the answer was generated from the visible demo context.',
       )
     } finally {
       setIsBusy(false)
@@ -242,6 +260,10 @@ function App() {
     }
   }
 
+  const leftCount = visibleMetricIds.filter((metricId) => metricAxisMap[metricId] === 'left').length
+  const rightCount = visibleMetricIds.filter((metricId) => metricAxisMap[metricId] === 'right').length
+  const latestRelationship = relationships[0]
+
   return (
     <div className="app-shell">
       <input
@@ -252,203 +274,179 @@ function App() {
         onChange={handleImportFile}
       />
 
-      <header className="hero">
-        <div className="hero__copy">
-          <div className="eyebrow-row">
-            <span className="eyebrow">Local Oura intelligence</span>
-            <span className="eyebrow eyebrow--subtle">Demo-first, API-ready</span>
-          </div>
-          <h1>View your Oura data as a living model, not a single metric page.</h1>
-          <p className="hero__lede">
-            Compose any overlay, inspect the relationships, and chat directly with GPT using the data that is
-            visible on screen.
+      <header className="topbar">
+        <div className="topbar__intro">
+          <span className="topbar__eyebrow">Oura Local</span>
+          <h1>Compose the view, keep the data central.</h1>
+          <p>
+            Browse metrics, assign axes, and switch between raw values, normalized overlays, and relative movement
+            without leaving the chart.
           </p>
-
-          <div className="hero__highlights">
-            <article className="mini-stat">
-              <Clock3 size={16} />
-              <div>
-                <span>Window</span>
-                <strong>{daysLabel(selectedWindow)}</strong>
-              </div>
-            </article>
-            <article className="mini-stat">
-              <Radar size={16} />
-              <div>
-                <span>Overlay series</span>
-                <strong>{selectedMetricIds.length}</strong>
-              </div>
-            </article>
-            <article className="mini-stat">
-              <BrainCircuit size={16} />
-              <div>
-                <span>Chat context</span>
-                <strong>{chatContext.selectedMetrics.length} fields</strong>
-              </div>
-            </article>
-          </div>
         </div>
 
-        <div className="hero__status">
-          <SyncControls
-            onSync={handleSync}
-            onImportClick={handleImportClick}
-            onConnectOura={startOuraOAuth}
-            showConnectOura={Boolean(!ouraAuth?.connected && !ouraAuth?.hasPersonalAccessToken && ouraAuth?.hasClientCredentials)}
-            apiMode={apiMode}
-            statusText={syncStatus}
-            busy={isBusy}
-          />
-
-          <div className="hero__stack">
-            <div className="hero__stack-item">
-              <MoonStar size={16} />
-              <div>
-                <span>Recovery signal</span>
-                <strong>{recoveryHeadline}</strong>
-              </div>
-            </div>
-            <div className="hero__stack-item">
-              <Activity size={16} />
-              <div>
-                <span>Activity load</span>
-                <strong>{currentRecord ? formatMetricValue('strain', currentRecord.strain) : '—'}</strong>
-              </div>
-            </div>
-            <div className="hero__stack-item">
-              <HeartPulse size={16} />
-              <div>
-                <span>Sleep efficiency</span>
-                <strong>
-                  {currentRecord ? formatMetricValue('sleepEfficiency', currentRecord.sleepEfficiency) : '—'}
-                </strong>
-              </div>
-            </div>
-          </div>
-        </div>
+        <SyncControls
+          onSync={handleSync}
+          onImportClick={handleImportClick}
+          onConnectOura={startOuraOAuth}
+          showConnectOura={Boolean(!ouraAuth?.connected && !ouraAuth?.hasPersonalAccessToken && ouraAuth?.hasClientCredentials)}
+          apiMode={apiMode}
+          statusText={syncStatus}
+          busy={isBusy}
+        />
       </header>
 
-      <main className="dashboard">
-        <Panel
-          eyebrow="Dashboard"
-          title="Compose the view you actually want"
-          description="Select any combination of metrics, then compare them on a shared time axis."
-          action={
-            <div className="range-picker" role="tablist" aria-label="Time window">
+      <main className="workspace">
+        <aside className="controls-pane">
+          <section className="control-block">
+            <div className="control-block__header">
+              <span className="control-label">X-axis</span>
+              <span className="control-hint">Change the horizontal read.</span>
+            </div>
+            <div className="segmented-control">
+              {(['date', 'sequence'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`segment ${xAxisMode === mode ? 'segment--active' : ''}`}
+                  onClick={() => setXAxisMode(mode)}
+                >
+                  {mode === 'date' ? 'Date' : 'Sequence'}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="control-block">
+            <div className="control-block__header">
+              <span className="control-label">Units</span>
+              <span className="control-hint">Switch between absolute and comparative views.</span>
+            </div>
+            <div className="segmented-control segmented-control--stacked">
+              {(['raw', 'normalized', 'relative'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`segment ${displayMode === mode ? 'segment--active' : ''}`}
+                  onClick={() => setDisplayMode(mode)}
+                >
+                  {mode === 'raw' ? 'Raw' : mode === 'normalized' ? 'Relative units' : 'Percent from baseline'}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="control-block">
+            <div className="control-block__header">
+              <span className="control-label">Window</span>
+              <span className="control-hint">{activeRecords.length} samples loaded.</span>
+            </div>
+            <div className="segmented-control">
               {rangeOptions.map((option) => (
                 <button
                   key={option}
                   type="button"
-                  className={`range-button ${selectedWindow === option ? 'range-button--active' : ''}`}
-                  onClick={() => {
-                    startTransition(() => setSelectedWindow(option))
-                  }}
+                  className={`segment ${selectedWindow === option ? 'segment--active' : ''}`}
+                  onClick={() => setSelectedWindow(option)}
                 >
                   {daysLabel(option)}
                 </button>
               ))}
             </div>
-          }
-        >
-          <div className="dashboard__controls">
-            <MetricComposer
-              metrics={metricCatalog}
-              selectedMetricIds={selectedMetricIds}
-              onToggleMetric={handleToggleMetric}
-              onReset={() => setSelectedMetricIds(defaultSelectedMetricIds)}
-              busy={isPending}
-            />
+          </section>
+
+          <section className="control-block control-block--metrics">
+            <div className="control-block__header">
+              <span className="control-label">Metric browser</span>
+              <span className="control-hint">{visibleMetricIds.length} in chart</span>
+            </div>
+
+            <label className="search-input">
+              <Search size={15} />
+              <input
+                value={metricQuery}
+                onChange={(event) => setMetricQuery(event.target.value)}
+                placeholder="Search metrics, units, categories"
+              />
+            </label>
+
+            <div className="metric-list">
+              {filteredMetrics.map((metric) => {
+                const axis = metricAxisMap[metric.id]
+                return (
+                  <article className="metric-row" key={metric.id}>
+                    <div className="metric-row__meta">
+                      <span className="metric-dot" style={{ backgroundColor: metric.color }} />
+                      <div>
+                        <div className="metric-row__topline">
+                          <strong>{metric.label}</strong>
+                          <span>{metric.unit}</span>
+                        </div>
+                        <p>{metric.description}</p>
+                        <small>{metric.category}</small>
+                      </div>
+                    </div>
+                    <div className="metric-axis-picker">
+                      {(['off', 'left', 'right'] as const).map((side) => (
+                        <button
+                          key={side}
+                          type="button"
+                          className={`axis-chip ${axis === side ? 'axis-chip--active' : ''}`}
+                          onClick={() => handleMetricAxisChange(metric.id, side)}
+                          disabled={isPending}
+                        >
+                          {side === 'off' ? 'Off' : side === 'left' ? 'Left' : 'Right'}
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          </section>
+        </aside>
+
+        <section className="chart-pane">
+          <div className="chart-pane__header">
+            <div>
+              <span className="topbar__eyebrow">Analysis view</span>
+              <h2>Custom overlay</h2>
+            </div>
+            <div className="chart-pane__stats">
+              <span>{leftCount} left-axis series</span>
+              <span>{rightCount} right-axis series</span>
+              <span>{displayMode}</span>
+            </div>
           </div>
 
-          <SummaryCards deltas={metricDeltas} />
-        </Panel>
+          <OverlayChart
+            chartData={chartData}
+            visibleMetricIds={visibleMetricIds}
+            axisByMetric={metricAxisMap}
+            displayMode={displayMode}
+            xAxisMode={xAxisMode}
+          />
 
-        <div className="dashboard__grid">
-          <Panel
-            eyebrow="Overlay"
-            title="Multi-metric trend map"
-            description="The chart automatically normalizes each series so you can judge co-movement across unlike units."
-            action={
-              <span className="chart-note">
-                {selectedMetrics.map((metric) => metric.label).join(' · ')}
-              </span>
-            }
-            className="dashboard__chart-panel"
-          >
-            <OverlayChart
-              records={activeRecords}
-              selectedMetricIds={selectedMetricIds}
-              chartData={chartData}
-            />
-          </Panel>
-
-          <Panel
-            eyebrow="Relationships"
-            title="What moves together"
-            description="This panel surfaces the strongest pairwise relationships in the active window."
-            className="dashboard__insights-panel"
-          >
-            <RelationshipPanel relationships={relationships} />
-            {topRelationship ? (
-              <div className="insight-callout">
-                <p className="insight-callout__eyebrow">Primary relationship</p>
-                <strong>{topRelationship.label}</strong>
-                <p>{topRelationship.interpretation}</p>
-              </div>
-            ) : null}
-          </Panel>
-        </div>
-
-        <section className="dashboard__lower">
-          <Panel
-            eyebrow="AI"
-            title="Ask directly about the dashboard"
-            description="Every message includes the visible context so the model can answer against what you are seeing."
-            className="dashboard__chat-panel"
-          >
-            <ChatPanel
-              messages={messages}
-              input={chatInput}
-              onInputChange={setChatInput}
-              onSubmit={handleSendChat}
-              busy={isBusy}
-              context={chatContext}
-              apiMode={apiMode}
-            />
-          </Panel>
-
-          <Panel
-            eyebrow="Why it works"
-            title="Interpretability first"
-            description="A clean dashboard is only useful if it explains itself."
-            className="dashboard__notes-panel"
-          >
-            <div className="notes-stack">
-              <div className="notes-card">
-                <Layers3 size={16} />
-                <div>
-                  <strong>Shared overlay</strong>
-                  <p>Selected metrics are normalized together so relationships are visible without unit friction.</p>
-                </div>
-              </div>
-              <div className="notes-card">
-                <ChevronRight size={16} />
-                <div>
-                  <strong>Composable views</strong>
-                  <p>Pick any subset of Oura data sources and compare them in one chart and one context packet.</p>
-                </div>
-              </div>
-              <div className="notes-card">
-                <LoaderCircle size={16} />
-                <div>
-                  <strong>Demo-first</strong>
-                  <p>The UI starts with local synthetic data, then switches to live endpoints when they are available.</p>
-                </div>
-              </div>
-            </div>
-          </Panel>
+          <div className="chart-pane__footnote">
+            <p>
+              {latestRelationship
+                ? `Current strongest relationship: ${latestRelationship.label}. ${latestRelationship.interpretation}`
+                : 'Add at least two metrics to compare relationships over the active window.'}
+            </p>
+          </div>
         </section>
       </main>
+
+      <section className="chat-section">
+        <ChatPanel
+          messages={messages}
+          input={chatInput}
+          onInputChange={setChatInput}
+          onSubmit={handleSendChat}
+          busy={isBusy}
+          context={chatContext}
+          apiMode={apiMode}
+        />
+      </section>
     </div>
   )
 }
