@@ -365,8 +365,12 @@ function renderConnect() {
   box.innerHTML =
     `<p class="muted">Connect your Oura account. You'll be sent to Oura to ` +
     `authorize, then returned here.</p>` +
-    `<p class="muted small">Redirect URI (must be registered on your Oura app): ` +
-    `<code>${s.redirect_uri || ""}</code></p>` +
+    `<p class="muted small">This exact Redirect URI must be registered on your ` +
+    `Oura app at <a href="https://cloud.ouraring.com/oauth/applications" ` +
+    `target="_blank" rel="noreferrer">cloud.ouraring.com/oauth/applications</a>:` +
+    `<br><code>${s.redirect_uri || ""}</code></p>` +
+    `<p class="muted small">A <b>400 invalid_request</b> from Oura means this ` +
+    `URI isn't on the app's Redirect URIs list yet — add it there and retry.</p>` +
     `<div class="modal-actions">` +
     `<a class="btn" href="/api/auth/login">Connect Oura</a></div>`;
 }
