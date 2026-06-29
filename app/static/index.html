@@ -14,6 +14,10 @@
       <span class="ring"></span>
       <h1>Oura Local</h1>
     </div>
+    <nav class="nav" id="nav">
+      <button data-view="daily" class="nav-btn active">Explore</button>
+      <button data-view="intraday" class="nav-btn">Intraday</button>
+    </nav>
     <div class="status" id="status">Loading…</div>
     <div class="topbar-actions">
       <button id="sync-btn" class="btn">Sync</button>
@@ -21,7 +25,7 @@
     </div>
   </header>
 
-  <main class="layout">
+  <main class="layout" id="view-daily">
     <aside class="sidebar">
       <div class="panel">
         <div class="panel-head">
@@ -87,6 +91,46 @@
     </aside>
   </main>
 
+  <main class="layout intraday-layout hidden" id="view-intraday">
+    <aside class="sidebar">
+      <div class="panel">
+        <div class="panel-head"><h2>Nights</h2></div>
+        <div class="ranges" id="intraday-ranges" style="margin-bottom:8px">
+          <button data-range="14" class="chip active">14d</button>
+          <button data-range="30" class="chip">30d</button>
+          <button data-range="90" class="chip">90d</button>
+        </div>
+        <div id="night-list" class="metric-list"></div>
+      </div>
+    </aside>
+
+    <section class="content">
+      <div class="controls">
+        <span id="night-title" class="muted">Select a night to see its detail.</span>
+        <span class="spacer"></span>
+        <button id="backfill-btn" class="btn ghost small" title="Parse granular series from already-synced data">Backfill granular</button>
+      </div>
+
+      <div class="panel chart-panel" style="min-height:280px">
+        <div id="intraday-chart" class="chart"></div>
+        <div id="intraday-empty" class="empty">Pick a night.</div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Hypnogram</h2></div>
+        <div id="hypnogram" class="strip-wrap"></div>
+        <div class="strip-legend" id="hypnogram-legend"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Restlessness (30-sec motion)</h2></div>
+        <div id="movement" class="strip-wrap"></div>
+      </div>
+
+      <div id="night-stats" class="stats"></div>
+    </section>
+  </main>
+
   <!-- Settings modal -->
   <div id="modal" class="modal hidden">
     <div class="modal-card">
@@ -105,5 +149,6 @@
 
   <script src="/vendor/uPlot.iife.min.js"></script>
   <script src="/app.js"></script>
+  <script src="/intraday.js"></script>
 </body>
 </html>

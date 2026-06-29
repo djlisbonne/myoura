@@ -70,6 +70,44 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             source TEXT
         );
 
+        -- Generic sub-daily time series (overnight HR/HRV, MET, motion, etc.),
+        -- parsed from Oura SampleModel objects and string-encoded sequences.
+        CREATE TABLE IF NOT EXISTS samples (
+            series    TEXT NOT NULL,
+            ts        TEXT NOT NULL,
+            value     REAL NOT NULL,
+            period_id TEXT,
+            PRIMARY KEY (series, ts)
+        );
+        CREATE INDEX IF NOT EXISTS idx_samples_series ON samples(series, ts);
+        CREATE INDEX IF NOT EXISTS idx_samples_period ON samples(period_id);
+
+        -- One row per sleep period (naps kept, unlike the daily aggregate).
+        CREATE TABLE IF NOT EXISTS sleep_periods (
+            id             TEXT PRIMARY KEY,
+            day            TEXT NOT NULL,
+            type           TEXT,
+            bedtime_start  TEXT,
+            bedtime_end    TEXT,
+            hypnogram      TEXT,
+            movement       TEXT,
+            raw            TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_sleep_periods_day ON sleep_periods(day);
+
+        -- Timestamped Oura events (enhanced_tag, sessions, workouts).
+        CREATE TABLE IF NOT EXISTS oura_events (
+            id        TEXT PRIMARY KEY,
+            kind      TEXT NOT NULL,
+            start_ts  TEXT,
+            end_ts    TEXT,
+            day       TEXT,
+            label     TEXT,
+            comment   TEXT,
+            raw       TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_oura_events_day ON oura_events(kind, day);
+
         CREATE TABLE IF NOT EXISTS sync_runs (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             started_at  TEXT NOT NULL,
@@ -179,6 +217,145 @@ def heart_rate_series(start: str | None = None, end: str | None = None,
     rows = connect().execute(sql, params).fetchall()
     rows = list(reversed(rows))
     return [{"ts": r["ts"], "bpm": r["bpm"], "source": r["source"]} for r in rows]
+
+
+# --- sub-daily samples -------------------------------------------------------
+
+def upsert_samples(rows: Iterable[tuple[str, str, float, str | None]]) -> int:
+    rows = list(rows)
+    if not rows:
+        return 0
+    with _lock:
+        connect().executemany(
+            "INSERT INTO samples(series, ts, value, period_id) VALUES(?, ?, ?, ?) "
+            "ON CONFLICT(series, ts) DO UPDATE SET "
+            "value = excluded.value, period_id = excluded.period_id",
+            rows,
+        )
+    return len(rows)
+
+
+def samples_series(series: str, start: str | None = None, end: str | None = None,
+                   limit: int = 20000) -> list[dict[str, Any]]:
+    sql = "SELECT ts, value FROM samples WHERE series = ?"
+    params: list[Any] = [series]
+    if start:
+        sql += " AND ts >= ?"
+        params.append(start)
+    if end:
+        sql += " AND ts <= ?"
+        params.append(end)
+    sql += " ORDER BY ts LIMIT ?"
+    params.append(limit)
+    rows = connect().execute(sql, params).fetchall()
+    return [{"ts": r["ts"], "value": r["value"]} for r in rows]
+
+
+def sample_series_keys() -> list[str]:
+    rows = connect().execute(
+        "SELECT DISTINCT series FROM samples ORDER BY series"
+    ).fetchall()
+    return [r["series"] for r in rows]
+
+
+# --- sleep periods -----------------------------------------------------------
+
+def upsert_sleep_periods(
+    rows: Iterable[tuple[str, str, str | None, str | None, str | None,
+                         str | None, str | None, str]]
+) -> int:
+    rows = list(rows)
+    if not rows:
+        return 0
+    with _lock:
+        connect().executemany(
+            "INSERT INTO sleep_periods"
+            "(id, day, type, bedtime_start, bedtime_end, hypnogram, movement, raw) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "day=excluded.day, type=excluded.type, "
+            "bedtime_start=excluded.bedtime_start, bedtime_end=excluded.bedtime_end, "
+            "hypnogram=excluded.hypnogram, movement=excluded.movement, raw=excluded.raw",
+            rows,
+        )
+    return len(rows)
+
+
+def list_sleep_periods(start: str | None = None, end: str | None = None
+                       ) -> list[dict[str, Any]]:
+    sql = ("SELECT id, day, type, bedtime_start, bedtime_end, hypnogram, movement "
+           "FROM sleep_periods WHERE 1=1")
+    params: list[Any] = []
+    if start:
+        sql += " AND day >= ?"
+        params.append(start)
+    if end:
+        sql += " AND day <= ?"
+        params.append(end)
+    sql += " ORDER BY bedtime_start"
+    rows = connect().execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_sleep_period(period_id: str) -> dict[str, Any] | None:
+    row = connect().execute(
+        "SELECT * FROM sleep_periods WHERE id = ?", (period_id,)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+# --- oura events -------------------------------------------------------------
+
+def upsert_oura_events(
+    rows: Iterable[tuple[str, str, str | None, str | None, str | None,
+                         str | None, str | None, str]]
+) -> int:
+    rows = list(rows)
+    if not rows:
+        return 0
+    with _lock:
+        connect().executemany(
+            "INSERT INTO oura_events"
+            "(id, kind, start_ts, end_ts, day, label, comment, raw) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "kind=excluded.kind, start_ts=excluded.start_ts, end_ts=excluded.end_ts, "
+            "day=excluded.day, label=excluded.label, comment=excluded.comment, "
+            "raw=excluded.raw",
+            rows,
+        )
+    return len(rows)
+
+
+def list_oura_events(kind: str | None = None, start: str | None = None,
+                     end: str | None = None) -> list[dict[str, Any]]:
+    sql = "SELECT id, kind, start_ts, end_ts, day, label, comment FROM oura_events WHERE 1=1"
+    params: list[Any] = []
+    if kind:
+        sql += " AND kind = ?"
+        params.append(kind)
+    if start:
+        sql += " AND day >= ?"
+        params.append(start)
+    if end:
+        sql += " AND day <= ?"
+        params.append(end)
+    sql += " ORDER BY start_ts"
+    rows = connect().execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def list_documents(collection: str) -> list[dict[str, Any]]:
+    """All raw documents for a collection — used by the granular backfill."""
+    rows = connect().execute(
+        "SELECT collection, doc_id, day, raw FROM documents WHERE collection = ?",
+        (collection,),
+    ).fetchall()
+    return [
+        {"collection": r["collection"], "doc_id": r["doc_id"], "day": r["day"],
+         "raw": r["raw"]}
+        for r in rows
+    ]
 
 
 def coverage() -> dict[str, Any]:

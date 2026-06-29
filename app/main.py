@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, auth, chat, db, oura, sync
+from . import __version__, auth, chat, db, granular, oura, sync
 from .config import get_settings
 from .metrics import CATALOG_BY_KEY, catalog_payload, groups
 
@@ -133,6 +133,49 @@ def get_heart_rate(start: str | None = None, end: str | None = None,
 @app.get("/api/coverage")
 def get_coverage() -> dict[str, Any]:
     return db.coverage()
+
+
+# --- granular / intraday ----------------------------------------------------
+
+@app.post("/api/backfill")
+def backfill() -> dict[str, Any]:
+    """Parse granular series out of already-stored raw documents (no API)."""
+    return granular.backfill_from_documents()
+
+
+@app.get("/api/intraday/catalog")
+def intraday_catalog() -> dict[str, Any]:
+    return {"series": granular.series_catalog(),
+            "available": db.sample_series_keys()}
+
+
+@app.get("/api/intraday/samples")
+def intraday_samples(series: str, start: str | None = None,
+                     end: str | None = None, limit: int = 20000) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key in (k for k in series.split(",") if k):
+        out[key] = db.samples_series(key, start, end, limit)
+    return {"samples": out}
+
+
+@app.get("/api/sleep-periods")
+def sleep_periods(start: str | None = None, end: str | None = None
+                  ) -> dict[str, Any]:
+    return {"periods": db.list_sleep_periods(start, end)}
+
+
+@app.get("/api/sleep-periods/{period_id}")
+def sleep_period(period_id: str) -> dict[str, Any]:
+    period = db.get_sleep_period(period_id)
+    if not period:
+        raise HTTPException(404, "Sleep period not found.")
+    return period
+
+
+@app.get("/api/events")
+def oura_events(kind: str | None = None, start: str | None = None,
+                end: str | None = None) -> dict[str, Any]:
+    return {"events": db.list_oura_events(kind, start, end)}
 
 
 # --- sync -------------------------------------------------------------------

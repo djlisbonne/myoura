@@ -42,6 +42,8 @@ class Metric:
     # Multiply the raw value by this (e.g. seconds -> hours = 1/3600).
     scale: float = 1.0
     description: str = ""
+    # For categorical fields: maps the raw string to an ordinal numeric value.
+    categories: tuple[tuple[str, float], ...] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -51,6 +53,7 @@ class Metric:
             "unit": self.unit,
             "decimals": self.decimals,
             "description": self.description,
+            "categories": dict(self.categories) if self.categories else None,
         }
 
 
@@ -143,6 +146,47 @@ CATALOG: list[Metric] = [
            "contributors.daytime_recovery"),
     Metric("resilience_stress", "Resilience: Stress", "Stress & Recovery",
            "daily_resilience", "", 1, "contributors.stress"),
+    Metric("stress_day_summary", "Stress Day Summary", "Stress & Recovery",
+           "daily_stress", "", 0, "day_summary",
+           description="Daily stress verdict, ordinal: restored +1, normal 0, "
+                       "stressful -1.",
+           categories=(("restored", 1.0), ("normal", 0.0), ("stressful", -1.0))),
+    Metric("breathing_disturbance", "Breathing Disturbance Index", "Vitals",
+           "daily_spo2", "", 0, "breathing_disturbance_index",
+           description="Index of nocturnal SpO2 drops (0–100)."),
+
+    # --- Sleep contributors (daily_sleep score sub-scores, 0–100) ----------
+    *[Metric(f"sc_{k}", f"Sleep · {lbl}", "Sleep Contributors", "daily_sleep",
+             "", 0, f"contributors.{k}")
+      for k, lbl in (
+          ("deep_sleep", "Deep Sleep"), ("efficiency", "Efficiency"),
+          ("latency", "Latency"), ("rem_sleep", "REM Sleep"),
+          ("restfulness", "Restfulness"), ("timing", "Timing"),
+          ("total_sleep", "Total Sleep"))],
+
+    # --- Readiness contributors (0–100) ------------------------------------
+    *[Metric(f"rc_{k}", f"Readiness · {lbl}", "Readiness Contributors",
+             "daily_readiness", "", 0, f"contributors.{k}")
+      for k, lbl in (
+          ("activity_balance", "Activity Balance"),
+          ("body_temperature", "Body Temperature"),
+          ("hrv_balance", "HRV Balance"),
+          ("previous_day_activity", "Previous Day Activity"),
+          ("previous_night", "Previous Night"),
+          ("recovery_index", "Recovery Index"),
+          ("resting_heart_rate", "Resting Heart Rate"),
+          ("sleep_balance", "Sleep Balance"),
+          ("sleep_regularity", "Sleep Regularity"))],
+
+    # --- Activity contributors (0–100) -------------------------------------
+    *[Metric(f"ac_{k}", f"Activity · {lbl}", "Activity Contributors",
+             "daily_activity", "", 0, f"contributors.{k}")
+      for k, lbl in (
+          ("stay_active", "Stay Active"), ("move_every_hour", "Move Every Hour"),
+          ("meet_daily_targets", "Meet Daily Targets"),
+          ("training_frequency", "Training Frequency"),
+          ("training_volume", "Training Volume"),
+          ("recovery_time", "Recovery Time"))],
 ]
 
 CATALOG_BY_KEY: dict[str, Metric] = {m.key: m for m in CATALOG}
@@ -170,6 +214,11 @@ def extract_daily(collection: str, doc: dict[str, Any]) -> dict[str, float]:
     for metric in _METRICS_BY_COLLECTION.get(collection, []):
         raw = _dotted(doc, metric.path)
         if raw is None or isinstance(raw, bool):
+            continue
+        if metric.categories is not None:
+            mapping = dict(metric.categories)
+            if isinstance(raw, str) and raw in mapping:
+                out[metric.key] = mapping[raw]
             continue
         try:
             out[metric.key] = float(raw) * metric.scale
