@@ -10,8 +10,6 @@ from __future__ import annotations
 import statistics
 from typing import Any, AsyncGenerator
 
-from anthropic import AsyncAnthropic
-
 from . import db
 from .config import get_settings
 from .metrics import CATALOG_BY_KEY
@@ -96,6 +94,11 @@ async def stream_answer(question: str, metric_keys: list[str],
                         history: list[dict[str, str]] | None = None
                         ) -> AsyncGenerator[str, None]:
     settings = get_settings()
+    # Imported lazily: the anthropic SDK is a large, slow import, and the chat
+    # feature is optional and used on demand — keep it off the startup path so
+    # the server boots fast even on a busy machine.
+    from anthropic import AsyncAnthropic
+
     client = AsyncAnthropic(api_key=settings.anthropic_api_key)
 
     context = build_context(metric_keys, start, end)
