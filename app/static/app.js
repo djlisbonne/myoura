@@ -8,7 +8,7 @@ const state = {
   byKey: {},
   selected: [],        // ordered list of metric keys
   range: "30",
-  normalize: false,
+  axisMode: "shared",  // "shared" | "separate" | "normalized"
   status: null,
   chart: null,
   chatHistory: [],
@@ -104,6 +104,13 @@ function renderMetricList(filter) {
   }
 }
 
+function setAxisMode(mode) {
+  state.axisMode = mode;
+  document.querySelectorAll("#axis-mode .seg-btn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.mode === mode));
+  refresh();
+}
+
 function toggleMetric(key) {
   const i = state.selected.indexOf(key);
   if (i >= 0) state.selected.splice(i, 1);
@@ -169,7 +176,7 @@ function buildAligned(series) {
     const map = {};
     for (const p of series[key] || []) map[p.day] = p.value;
     let col = days.map((d) => (d in map ? map[d] : null));
-    if (state.normalize) col = normalizeValues(col);
+    if (state.axisMode === "normalized") col = normalizeValues(col);
     cols.push(col);
   }
   return cols;
@@ -186,36 +193,78 @@ function chartSize() {
 }
 
 function drawChart(series) {
+  const mode = state.axisMode;
   const data = buildAligned(series);
+  const sel = state.selected;
+
   const seriesOpts = [{ label: "Day" }];
-  state.selected.forEach((key, idx) => {
+  const scales = { x: { time: true } };
+  // x-axis is always first
+  const axes = [{ stroke: css("--muted"), grid: { stroke: css("--border"), width: 1 },
+                  ticks: { stroke: css("--border") } }];
+
+  sel.forEach((key, idx) => {
     const m = state.byKey[key];
+    const scaleKey = mode === "separate" ? `y_${key}` : "y";
+    if (mode === "separate") scales[scaleKey] = {};
     seriesOpts.push({
-      label: state.normalize ? m.label : `${m.label}${m.unit ? " (" + m.unit + ")" : ""}`,
+      label: mode === "normalized" ? m.label : `${m.label}${m.unit ? " (" + m.unit + ")" : ""}`,
       stroke: colorFor(idx),
       width: 2,
+      scale: scaleKey,
       points: { show: false },
       spanGaps: false,
-      value: (u, v) => (v == null ? "—" : (state.normalize ? v.toFixed(2)
-        : v.toFixed(m.decimals)) + (state.normalize ? "" : (m.unit ? " " + m.unit : ""))),
+      value: (u, v) => (v == null ? "—"
+        : mode === "normalized" ? v.toFixed(2)
+        : v.toFixed(m.decimals) + (m.unit ? " " + m.unit : "")),
     });
   });
+
+  if (mode === "separate") {
+    // first metric gets the left axis, second gets the right; the rest keep
+    // their own independent scale but no labelled axis (read them off the
+    // legend / stat cards). Axis colour matches the series.
+    sel.forEach((key, idx) => {
+      if (idx === 0) {
+        axes.push({ scale: `y_${key}`, side: 3, stroke: colorFor(0),
+          grid: { stroke: css("--border"), width: 1 }, ticks: { stroke: css("--border") } });
+      } else if (idx === 1) {
+        axes.push({ scale: `y_${key}`, side: 1, stroke: colorFor(1),
+          grid: { show: false }, ticks: { stroke: css("--border") } });
+      }
+    });
+  } else {
+    axes.push({ stroke: css("--muted"), grid: { stroke: css("--border"), width: 1 },
+                ticks: { stroke: css("--border") } });
+  }
+
   const { width, height } = chartSize();
   const opts = {
-    width, height,
+    width,
+    height: Math.max(height - 40, 200),  // reserve initial room; fitLegend refines
     cursor: { drag: { x: true, y: false } },
     legend: { live: true },
-    scales: { x: { time: true } },
-    axes: [
-      { stroke: css("--muted"), grid: { stroke: css("--border"), width: 1 },
-        ticks: { stroke: css("--border") } },
-      { stroke: css("--muted"), grid: { stroke: css("--border"), width: 1 },
-        ticks: { stroke: css("--border") } },
-    ],
+    scales,
+    axes,
     series: seriesOpts,
   };
   destroyChart();
   state.chart = new uPlot(opts, data, document.getElementById("chart"));
+  fitLegend();
+}
+
+// Resize the plot so the canvas + legend exactly fit the panel — keeps the
+// legend from spilling over the stat cards below.
+function fitLegend() {
+  if (!state.chart) return;
+  const panel = document.querySelector(".chart-panel");
+  const avail = Math.max(panel.clientHeight - 24, 220);
+  const legend = state.chart.root.querySelector(".u-legend");
+  const legendH = legend ? legend.offsetHeight : 0;
+  const target = Math.max(avail - legendH - 8, 180);
+  if (Math.abs(state.chart.height - target) > 3) {
+    state.chart.setSize({ width: chartSize().width, height: target });
+  }
 }
 
 // --- Stats cards ------------------------------------------------------------
@@ -285,8 +334,10 @@ function applyView(v) {
   const cfg = v.config || {};
   state.selected = (cfg.metrics || []).filter((k) => k in state.byKey);
   if (cfg.range) state.range = cfg.range;
-  if (typeof cfg.normalize === "boolean") state.normalize = cfg.normalize;
-  document.getElementById("normalize").checked = state.normalize;
+  // accept the new axisMode, or fall back to the old normalize boolean
+  state.axisMode = cfg.axisMode || (cfg.normalize ? "normalized" : "shared");
+  document.querySelectorAll("#axis-mode .seg-btn").forEach((b) =>
+    b.classList.toggle("active", b.dataset.mode === state.axisMode));
   document.querySelectorAll("#ranges .chip").forEach((c) =>
     c.classList.toggle("active", c.dataset.range === state.range));
   renderMetricList(document.getElementById("metric-filter").value);
@@ -301,7 +352,7 @@ async function saveView() {
     method: "POST",
     body: JSON.stringify({
       name,
-      config: { metrics: state.selected, range: state.range, normalize: state.normalize },
+      config: { metrics: state.selected, range: state.range, axisMode: state.axisMode },
     }),
   });
   document.getElementById("view-name").value = "";
@@ -476,9 +527,9 @@ function wire() {
   document.getElementById("chat-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(e); }
   });
-  document.getElementById("normalize").onchange = (e) => {
-    state.normalize = e.target.checked; refresh();
-  };
+  document.querySelectorAll("#axis-mode .seg-btn").forEach((btn) => {
+    btn.onclick = () => setAxisMode(btn.dataset.mode);
+  });
   document.querySelectorAll("#ranges .chip").forEach((chip) => {
     chip.onclick = () => {
       document.querySelectorAll("#ranges .chip").forEach((c) => c.classList.remove("active"));
