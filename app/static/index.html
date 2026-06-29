@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Oura Local</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='38' fill='none' stroke='%237aa2ff' stroke-width='12'/></svg>" />
+  <link rel="stylesheet" href="/vendor/uPlot.min.css" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="ring"></span>
+      <h1>Oura Local</h1>
+    </div>
+    <div class="status" id="status">Loading…</div>
+    <div class="topbar-actions">
+      <button id="sync-btn" class="btn">Sync</button>
+      <button id="settings-btn" class="btn ghost">Settings</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Metrics</h2>
+          <button id="clear-metrics" class="link">clear</button>
+        </div>
+        <input id="metric-filter" class="filter" placeholder="Filter metrics…" />
+        <div id="metric-list" class="metric-list"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>Saved views</h2></div>
+        <div class="view-save">
+          <input id="view-name" class="filter" placeholder="Name this view…" />
+          <button id="save-view" class="btn small">Save</button>
+        </div>
+        <div id="views-list" class="views-list"></div>
+      </div>
+    </aside>
+
+    <section class="content">
+      <div class="controls">
+        <div class="ranges" id="ranges">
+          <button data-range="7" class="chip">7d</button>
+          <button data-range="30" class="chip active">30d</button>
+          <button data-range="90" class="chip">90d</button>
+          <button data-range="365" class="chip">1y</button>
+          <button data-range="all" class="chip">All</button>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="normalize" /> Normalize (compare shapes)
+        </label>
+        <span class="spacer"></span>
+        <span id="selection-summary" class="muted"></span>
+      </div>
+
+      <div class="panel chart-panel">
+        <div id="chart" class="chart"></div>
+        <div id="chart-empty" class="empty">Pick one or more metrics to chart them.</div>
+      </div>
+
+      <div id="stats" class="stats"></div>
+    </section>
+
+    <aside class="chatcol" id="chatcol">
+      <div class="panel chat-panel">
+        <div class="panel-head">
+          <h2>Ask about your data</h2>
+        </div>
+        <div id="chat-log" class="chat-log">
+          <div class="chat-hint" id="chat-hint">
+            Select some metrics, then ask things like “How has my HRV trended this
+            month?” or “Does my deep sleep track with readiness?”
+          </div>
+        </div>
+        <form id="chat-form" class="chat-form">
+          <textarea id="chat-input" placeholder="Ask a question…" rows="2"></textarea>
+          <button class="btn" id="chat-send" type="submit">Send</button>
+        </form>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Settings modal -->
+  <div id="modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Settings</h2>
+      <p class="muted">
+        Paste your Oura <b>Personal Access Token</b>. Create one at
+        <a href="https://cloud.ouraring.com/personal-access-tokens" target="_blank"
+           rel="noreferrer">cloud.ouraring.com/personal-access-tokens</a>.
+        It's stored locally and never leaves this machine.
+      </p>
+      <input id="token-input" class="filter" placeholder="Personal Access Token" />
+      <div id="token-msg" class="muted"></div>
+      <div class="modal-actions">
+        <button id="token-save" class="btn">Save &amp; verify</button>
+        <button id="modal-close" class="btn ghost">Close</button>
+      </div>
+      <hr />
+      <div id="settings-info" class="muted small"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/vendor/uPlot.iife.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
