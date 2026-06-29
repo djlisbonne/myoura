@@ -19,7 +19,10 @@ class Settings:
     project_root: Path = _PROJECT_ROOT
 
     def __init__(self) -> None:
-        self.host: str = os.getenv("HOST", "127.0.0.1")
+        # Bind to "localhost" (not "127.0.0.1") so both IPv4 and IPv6 loopback
+        # are served. On macOS "localhost" prefers IPv6 (::1); binding IPv4-only
+        # makes every browser request stall for seconds before falling back.
+        self.host: str = os.getenv("HOST", "localhost")
         self.port: int = int(os.getenv("PORT", "8000"))
 
         # Oura uses OAuth2 (Personal Access Tokens were discontinued in 2025).

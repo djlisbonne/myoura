@@ -4,7 +4,7 @@
     {
       "name": "oura",
       "runtimeExecutable": ".venv/bin/uvicorn",
-      "runtimeArgs": ["app.main:app", "--host", "127.0.0.1", "--port", "8000"],
+      "runtimeArgs": ["app.main:app", "--host", "localhost", "--port", "8000"],
       "port": 8000
     }
   ]

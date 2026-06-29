@@ -8,6 +8,6 @@ if [ -d .venv ]; then
   source .venv/bin/activate
 fi
 
-HOST="${HOST:-127.0.0.1}"
+HOST="${HOST:-localhost}"
 PORT="${PORT:-8000}"
 exec uvicorn app.main:app --host "$HOST" --port "$PORT" "$@"
