@@ -50,8 +50,8 @@ async function loadStatus() {
 function renderStatus() {
   const s = state.status;
   const el = document.getElementById("status");
-  if (!s.oura_token_configured) {
-    el.innerHTML = `<b>No Oura token.</b> Open Settings to connect your ring.`;
+  if (!s.oura_connected) {
+    el.innerHTML = `<b>Not connected.</b> Open Settings to connect your Oura account.`;
     return;
   }
   if (s.oura_error) {
@@ -326,9 +326,10 @@ async function doSync() {
   }
 }
 
-// --- Settings / token -------------------------------------------------------
+// --- Settings / Oura connection ---------------------------------------------
 function openModal() {
   document.getElementById("modal").classList.remove("hidden");
+  renderConnect();
   const info = document.getElementById("settings-info");
   const s = state.status;
   info.innerHTML = s?.chat_enabled
@@ -337,20 +338,44 @@ function openModal() {
 }
 function closeModal() { document.getElementById("modal").classList.add("hidden"); }
 
-async function saveToken() {
-  const token = document.getElementById("token-input").value.trim();
-  const msg = document.getElementById("token-msg");
-  if (!token) { msg.textContent = "Paste a token first."; return; }
-  msg.textContent = "Verifying…";
-  try {
-    await api("/api/settings/oura-token", { method: "POST", body: JSON.stringify({ token }) });
-    msg.innerHTML = `<span style="color:var(--accent-2)">Connected!</span>`;
-    document.getElementById("token-input").value = "";
-    await loadStatus();
-    setTimeout(closeModal, 700);
-  } catch (e) {
-    msg.innerHTML = `<span style="color:var(--danger)">${e.message}</span>`;
+function renderConnect() {
+  const s = state.status || {};
+  const box = document.getElementById("oura-connect");
+  if (s.oura_connected) {
+    const who = s.oura_personal_info?.email || "your Oura account";
+    const mode = s.oura_auth?.mode === "pat" ? "Personal Access Token" : "OAuth2";
+    box.innerHTML =
+      `<p class="muted">Connected to <b>${who}</b> via ${mode}.</p>` +
+      `<div class="modal-actions">` +
+      `<button id="disconnect-btn" class="btn ghost">Disconnect</button></div>`;
+    document.getElementById("disconnect-btn").onclick = disconnectOura;
+    return;
   }
+  if (!s.oauth_configured) {
+    box.innerHTML =
+      `<p class="muted">Oura now uses <b>OAuth2</b> (Personal Access Tokens were ` +
+      `retired in 2025). To connect:</p>` +
+      `<ol class="muted small" style="line-height:1.7;padding-left:18px">` +
+      `<li>Create an app at <a href="https://cloud.ouraring.com/oauth/applications" ` +
+      `target="_blank" rel="noreferrer">cloud.ouraring.com/oauth/applications</a></li>` +
+      `<li>Add this Redirect URI to it:<br><code>${s.redirect_uri || ""}</code></li>` +
+      `<li>Put the client id/secret in your <code>.env</code> and restart.</li></ol>`;
+    return;
+  }
+  box.innerHTML =
+    `<p class="muted">Connect your Oura account. You'll be sent to Oura to ` +
+    `authorize, then returned here.</p>` +
+    `<p class="muted small">Redirect URI (must be registered on your Oura app): ` +
+    `<code>${s.redirect_uri || ""}</code></p>` +
+    `<div class="modal-actions">` +
+    `<a class="btn" href="/api/auth/login">Connect Oura</a></div>`;
+}
+
+async function disconnectOura() {
+  await api("/api/auth/disconnect", { method: "POST" });
+  await loadStatus();
+  renderConnect();
+  toast("Disconnected from Oura.");
 }
 
 // --- Chat -------------------------------------------------------------------
@@ -436,7 +461,6 @@ function wire() {
   document.getElementById("sync-btn").onclick = doSync;
   document.getElementById("settings-btn").onclick = openModal;
   document.getElementById("modal-close").onclick = closeModal;
-  document.getElementById("token-save").onclick = saveToken;
   document.getElementById("metric-filter").oninput = (e) => renderMetricList(e.target.value);
   document.getElementById("clear-metrics").onclick = () => {
     state.selected = [];
@@ -466,13 +490,31 @@ function wire() {
   });
 }
 
+function handleOAuthReturn() {
+  const params = new URLSearchParams(location.search);
+  const result = params.get("oura");
+  if (!result) return null;
+  history.replaceState({}, "", location.pathname);
+  return result === "connected"
+    ? { ok: true }
+    : { ok: false, reason: params.get("reason") || "unknown" };
+}
+
 async function init() {
   wire();
+  const ret = handleOAuthReturn();
   try {
     await loadStatus();
     await loadCatalog();
     await loadViews();
-    if (!state.status.oura_token_configured) openModal();
+    if (ret && ret.ok) {
+      toast("Connected to Oura — hit Sync to pull your data.", 3500);
+    } else if (ret && !ret.ok) {
+      toast("Oura connection failed: " + ret.reason, 5000);
+      openModal();
+    } else if (!state.status.oura_connected) {
+      openModal();
+    }
   } catch (e) {
     toast("Startup error: " + e.message, 5000);
   }

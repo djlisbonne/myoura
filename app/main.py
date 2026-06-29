@@ -7,11 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import __version__, chat, db, oura, sync
+from . import __version__, auth, chat, db, oura, sync
 from .config import get_settings
 from .metrics import CATALOG_BY_KEY, catalog_payload, groups
 
@@ -26,10 +26,6 @@ def _startup() -> None:
 
 
 # --- request models ---------------------------------------------------------
-
-class OuraTokenBody(BaseModel):
-    token: str
-
 
 class SyncBody(BaseModel):
     start: str | None = None
@@ -55,10 +51,10 @@ class ChatBody(BaseModel):
 @app.get("/api/status")
 async def status() -> dict[str, Any]:
     settings = get_settings()
-    token_ok = oura.token_configured()
+    auth_status = auth.status()
     info: dict[str, Any] | None = None
     info_error: str | None = None
-    if token_ok:
+    if auth_status["connected"]:
         try:
             info = await oura.personal_info()
         except oura.OuraError as exc:
@@ -66,7 +62,10 @@ async def status() -> dict[str, Any]:
     runs = db.recent_sync_runs(1)
     return {
         "version": __version__,
-        "oura_token_configured": token_ok,
+        "oura_connected": auth_status["connected"],
+        "oura_auth": auth_status,
+        "oauth_configured": auth.oauth_configured(),
+        "redirect_uri": settings.oura_redirect_uri,
         "oura_personal_info": info,
         "oura_error": info_error,
         "chat_enabled": settings.chat_enabled,
@@ -76,19 +75,34 @@ async def status() -> dict[str, Any]:
     }
 
 
-@app.post("/api/settings/oura-token")
-async def save_oura_token(body: OuraTokenBody) -> dict[str, Any]:
-    token = body.token.strip()
-    if not token:
-        raise HTTPException(400, "Token is empty.")
-    # Validate before persisting.
-    db.set_setting("oura_token", token)
+# --- Oura OAuth -------------------------------------------------------------
+
+@app.get("/api/auth/login")
+def auth_login() -> RedirectResponse:
     try:
-        info = await oura.personal_info()
-    except oura.OuraError as exc:
-        db.set_setting("oura_token", "")  # roll back a bad token
-        raise HTTPException(400, f"Token rejected by Oura: {exc}") from exc
-    return {"ok": True, "personal_info": info}
+        return RedirectResponse(auth.build_authorize_url())
+    except auth.AuthError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/auth/callback")
+async def auth_callback(code: str | None = None, state: str | None = None,
+                        error: str | None = None) -> RedirectResponse:
+    if error:
+        return RedirectResponse(f"/?oura=error&reason={error}")
+    if not code:
+        return RedirectResponse("/?oura=error&reason=missing_code")
+    try:
+        await auth.exchange_code(code, state)
+    except auth.AuthError as exc:
+        return RedirectResponse(f"/?oura=error&reason={exc}")
+    return RedirectResponse("/?oura=connected")
+
+
+@app.post("/api/auth/disconnect")
+def auth_disconnect() -> dict[str, Any]:
+    auth.disconnect()
+    return {"ok": True}
 
 
 # --- catalog & data ---------------------------------------------------------

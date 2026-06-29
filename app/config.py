@@ -22,7 +22,14 @@ class Settings:
         self.host: str = os.getenv("HOST", "127.0.0.1")
         self.port: int = int(os.getenv("PORT", "8000"))
 
-        # Oura: a Personal Access Token is the only credential needed.
+        # Oura uses OAuth2 (Personal Access Tokens were discontinued in 2025).
+        self.oura_client_id: str | None = os.getenv("OURA_CLIENT_ID") or None
+        self.oura_client_secret: str | None = os.getenv("OURA_CLIENT_SECRET") or None
+        # Must exactly match a Redirect URI registered on your Oura application.
+        self.oura_redirect_uri: str = os.getenv(
+            "OURA_REDIRECT_URI", f"http://localhost:{self.port}/api/auth/callback"
+        )
+        # Legacy Personal Access Token — still honoured as a fallback if present.
         self.oura_personal_access_token: str | None = (
             os.getenv("OURA_PERSONAL_ACCESS_TOKEN") or None
         )

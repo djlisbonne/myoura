@@ -10,7 +10,8 @@ JS frontend, with SQLite for local storage. No Node, no npm.
 
 ## What it does
 
-- **Connects to Oura** with a Personal Access Token — no OAuth, no callback URL.
+- **Connects to Oura** over OAuth2 — one "Connect Oura" click, tokens refreshed
+  automatically.
 - **Syncs** sleep, readiness, activity, stress/recovery, SpO₂, HRV, resting HR,
   temperature, cardiovascular age and more into a local SQLite store. Sync is
   incremental and tolerates partial data.
@@ -33,23 +34,33 @@ pip install -r requirements.txt
 
 # 2. Configure
 cp .env.example .env
-#   edit .env and add your Oura Personal Access Token (and optionally an
-#   Anthropic API key for the AI chat). You can also paste the Oura token
-#   later in the app's Settings dialog.
+#   edit .env: add your Oura OAuth client id/secret (see below) and optionally
+#   an Anthropic API key for the AI chat.
 
 # 3. Run
 ./run.sh
 #   or: uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Then open <http://127.0.0.1:8000>. On first launch the Settings dialog opens so
-you can paste your token; hit **Sync** to pull your history.
+Then open <http://localhost:8000>. On first launch the Settings dialog opens —
+click **Connect Oura**, authorize, and you're returned to the app. Hit **Sync**
+to pull your history.
 
-### Get an Oura Personal Access Token
+### Connect Oura (OAuth2)
 
-Create one at <https://cloud.ouraring.com/personal-access-tokens>. This is the
-right credential for a single-user local app — it needs no redirect URL, which is
-what made the old OAuth flow painful on localhost.
+Oura discontinued Personal Access Tokens in 2025, so the app uses OAuth2:
+
+1. Create an application at
+   <https://cloud.ouraring.com/oauth/applications>.
+2. Add this exact **Redirect URI** to it (it must match `OURA_REDIRECT_URI`):
+   `http://localhost:8000/api/auth/callback`
+3. Copy the client id and secret into `.env` as `OURA_CLIENT_ID` /
+   `OURA_CLIENT_SECRET`, then restart and click **Connect Oura**.
+
+Open the app at `http://localhost:8000` (not `127.0.0.1`) so the redirect URI
+matches what Oura has on file. The localhost callback works fine — the redirect
+URI just has to be registered on your Oura app, which is what the old attempt was
+missing.
 
 ### Enable AI chat (optional)
 
@@ -65,7 +76,8 @@ app/
   main.py      FastAPI app: REST API + serves the static frontend
   config.py    env-driven settings
   db.py        SQLite store (daily metrics, heart-rate series, views, sync log)
-  oura.py      async Oura Cloud API v2 client (PAT auth, pagination)
+  auth.py      Oura OAuth2 flow (authorize, token exchange, refresh)
+  oura.py      async Oura Cloud API v2 client (pagination)
   metrics.py   the metric catalog — drives sync, the API, and the UI
   sync.py      incremental pull + extract into the local store
   chat.py      Claude streaming chat, grounded in the data in view

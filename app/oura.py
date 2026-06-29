@@ -6,8 +6,7 @@ from typing import Any
 
 import httpx
 
-from . import db
-from .config import get_settings
+from . import auth
 
 BASE_URL = "https://api.ouraring.com"
 _PERSONAL_INFO = "/v2/usercollection/personal_info"
@@ -21,19 +20,8 @@ class OuraError(RuntimeError):
         self.status = status
 
 
-def resolve_token() -> str:
-    """A token saved through the UI wins over the one in the environment."""
-    token = db.get_setting("oura_token") or get_settings().oura_personal_access_token
-    if not token:
-        raise OuraError(
-            "No Oura Personal Access Token configured. Add one in Settings or set "
-            "OURA_PERSONAL_ACCESS_TOKEN."
-        )
-    return token
-
-
 def token_configured() -> bool:
-    return bool(db.get_setting("oura_token") or get_settings().oura_personal_access_token)
+    return auth.connected()
 
 
 def _client(token: str) -> httpx.AsyncClient:
@@ -58,9 +46,16 @@ async def _get(client: httpx.AsyncClient, path: str,
     return resp.json()
 
 
+async def _token() -> str:
+    try:
+        return await auth.get_access_token()
+    except auth.AuthError as exc:
+        raise OuraError(str(exc), 401) from exc
+
+
 async def fetch_collection(path: str, params: dict[str, Any]) -> list[dict[str, Any]]:
     """Fetch every page of a paginated Oura collection endpoint."""
-    token = resolve_token()
+    token = await _token()
     docs: list[dict[str, Any]] = []
     async with _client(token) as client:
         page_params = dict(params)
@@ -92,6 +87,6 @@ async def fetch_heartrate(start_datetime: str, end_datetime: str
 
 async def personal_info() -> dict[str, Any]:
     """Lightweight call used to validate a token and show whose data this is."""
-    token = resolve_token()
+    token = await _token()
     async with _client(token) as client:
         return await _get(client, _PERSONAL_INFO, {})
