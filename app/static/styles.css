@@ -126,6 +126,19 @@ a { color: var(--accent); }
 }
 .u-legend { font-size: 12px; }
 
+/* Floating hover tooltip */
+.u-tt {
+  position: absolute; pointer-events: none; z-index: 10;
+  background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px; min-width: 150px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+}
+.u-tt .tt-date { color: var(--muted); font-size: 11px; margin-bottom: 6px; }
+.tt-row { display: flex; align-items: center; gap: 7px; padding: 1px 0; }
+.tt-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.tt-name { flex: 1; color: var(--text); }
+.tt-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
 /* Stats */
 .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 .stat {

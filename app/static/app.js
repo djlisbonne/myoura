@@ -111,10 +111,19 @@ function setAxisMode(mode) {
   refresh();
 }
 
+const MAX_METRICS = 6;
+
 function toggleMetric(key) {
   const i = state.selected.indexOf(key);
-  if (i >= 0) state.selected.splice(i, 1);
-  else state.selected.push(key);
+  if (i >= 0) {
+    state.selected.splice(i, 1);
+  } else {
+    if (state.selected.length >= MAX_METRICS) {
+      toast(`Up to ${MAX_METRICS} metrics at once.`);
+      return;
+    }
+    state.selected.push(key);
+  }
   renderMetricList(document.getElementById("metric-filter").value);
   refresh();
 }
@@ -171,15 +180,16 @@ function buildAligned(series) {
   }
   const days = [...daySet].sort();
   const xs = days.map(dayToTs);
-  const cols = [xs];
+  const cols = [xs];      // what uPlot plots (normalized in normalized mode)
+  const rawCols = [xs];   // always the real values, for the tooltip
   for (const key of state.selected) {
     const map = {};
     for (const p of series[key] || []) map[p.day] = p.value;
-    let col = days.map((d) => (d in map ? map[d] : null));
-    if (state.axisMode === "normalized") col = normalizeValues(col);
-    cols.push(col);
+    const raw = days.map((d) => (d in map ? map[d] : null));
+    rawCols.push(raw);
+    cols.push(state.axisMode === "normalized" ? normalizeValues(raw) : raw);
   }
-  return cols;
+  return { cols, rawCols };
 }
 
 function destroyChart() {
@@ -194,7 +204,7 @@ function chartSize() {
 
 function drawChart(series) {
   const mode = state.axisMode;
-  const data = buildAligned(series);
+  const { cols, rawCols } = buildAligned(series);
   const sel = state.selected;
 
   const seriesOpts = [{ label: "Day" }];
@@ -221,17 +231,20 @@ function drawChart(series) {
   });
 
   if (mode === "separate") {
-    // first metric gets the left axis, second gets the right; the rest keep
-    // their own independent scale but no labelled axis (read them off the
-    // legend / stat cards). Axis colour matches the series.
+    // every metric gets its own labelled axis. uPlot stacks multiple axes on
+    // the same side, so alternate left/right; colour each to match its series.
     sel.forEach((key, idx) => {
-      if (idx === 0) {
-        axes.push({ scale: `y_${key}`, side: 3, stroke: colorFor(0),
-          grid: { stroke: css("--border"), width: 1 }, ticks: { stroke: css("--border") } });
-      } else if (idx === 1) {
-        axes.push({ scale: `y_${key}`, side: 1, stroke: colorFor(1),
-          grid: { show: false }, ticks: { stroke: css("--border") } });
-      }
+      const m = state.byKey[key];
+      axes.push({
+        scale: `y_${key}`,
+        side: idx % 2 === 0 ? 3 : 1,     // even -> left, odd -> right
+        stroke: colorFor(idx),
+        label: `${m.label}${m.unit ? " (" + m.unit + ")" : ""}`,
+        labelSize: 16,
+        size: 52,
+        grid: idx === 0 ? { stroke: css("--border"), width: 1 } : { show: false },
+        ticks: { stroke: css("--border") },
+      });
     });
   } else {
     axes.push({ stroke: css("--muted"), grid: { stroke: css("--border"), width: 1 },
@@ -247,10 +260,61 @@ function drawChart(series) {
     scales,
     axes,
     series: seriesOpts,
+    plugins: [tooltipPlugin(rawCols)],
   };
   destroyChart();
-  state.chart = new uPlot(opts, data, document.getElementById("chart"));
+  state.chart = new uPlot(opts, cols, document.getElementById("chart"));
   fitLegend();
+}
+
+// Floating hover tooltip: shows the day plus every metric's real value (with
+// units) at the hovered point, colour-coded to match each line.
+function tooltipPlugin(rawCols) {
+  let el;
+  return {
+    hooks: {
+      init(u) {
+        el = document.createElement("div");
+        el.className = "u-tt";
+        el.style.display = "none";
+        u.over.appendChild(el);
+      },
+      setCursor(u) {
+        const idx = u.cursor.idx;
+        const x = idx != null ? u.data[0][idx] : null;
+        if (idx == null || x == null || u.cursor.left < 0) {
+          el.style.display = "none";
+          return;
+        }
+        const date = new Date(x * 1000).toLocaleDateString(undefined, {
+          weekday: "short", month: "short", day: "numeric", year: "numeric",
+        });
+        let rows = "";
+        state.selected.forEach((key, i) => {
+          const m = state.byKey[key];
+          const v = rawCols[i + 1][idx];
+          const val = v == null ? "—"
+            : v.toFixed(m.decimals) + (m.unit ? " " + m.unit : "");
+          rows +=
+            `<div class="tt-row"><span class="tt-dot" style="background:${colorFor(i)}">` +
+            `</span><span class="tt-name">${m.label}</span>` +
+            `<span class="tt-val">${val}</span></div>`;
+        });
+        el.innerHTML = `<div class="tt-date">${date}</div>${rows}`;
+        el.style.display = "block";
+
+        const ow = u.over.clientWidth, oh = u.over.clientHeight;
+        const tw = el.offsetWidth, th = el.offsetHeight;
+        let lx = u.cursor.left + 16;
+        if (lx + tw > ow) lx = u.cursor.left - tw - 16;
+        let ty = u.cursor.top + 16;
+        if (ty + th > oh) ty = oh - th - 4;
+        if (ty < 0) ty = 4;
+        el.style.left = lx + "px";
+        el.style.top = ty + "px";
+      },
+    },
+  };
 }
 
 // Resize the plot so the canvas + legend exactly fit the panel — keeps the
