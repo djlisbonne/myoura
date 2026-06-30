@@ -84,14 +84,15 @@ def _init_schema(conn: sqlite3.Connection) -> None:
 
         -- One row per sleep period (naps kept, unlike the daily aggregate).
         CREATE TABLE IF NOT EXISTS sleep_periods (
-            id             TEXT PRIMARY KEY,
-            day            TEXT NOT NULL,
-            type           TEXT,
-            bedtime_start  TEXT,
-            bedtime_end    TEXT,
-            hypnogram      TEXT,
-            movement       TEXT,
-            raw            TEXT NOT NULL
+            id                 TEXT PRIMARY KEY,
+            day                TEXT NOT NULL,
+            type               TEXT,
+            bedtime_start      TEXT,
+            bedtime_end        TEXT,
+            hypnogram          TEXT,
+            hypnogram_interval INTEGER,
+            movement           TEXT,
+            raw                TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_sleep_periods_day ON sleep_periods(day);
 
@@ -262,7 +263,7 @@ def sample_series_keys() -> list[str]:
 
 def upsert_sleep_periods(
     rows: Iterable[tuple[str, str, str | None, str | None, str | None,
-                         str | None, str | None, str]]
+                         str | None, int | None, str | None, str]]
 ) -> int:
     rows = list(rows)
     if not rows:
@@ -270,12 +271,14 @@ def upsert_sleep_periods(
     with _lock:
         connect().executemany(
             "INSERT INTO sleep_periods"
-            "(id, day, type, bedtime_start, bedtime_end, hypnogram, movement, raw) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?) "
+            "(id, day, type, bedtime_start, bedtime_end, hypnogram, "
+            " hypnogram_interval, movement, raw) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET "
             "day=excluded.day, type=excluded.type, "
             "bedtime_start=excluded.bedtime_start, bedtime_end=excluded.bedtime_end, "
-            "hypnogram=excluded.hypnogram, movement=excluded.movement, raw=excluded.raw",
+            "hypnogram=excluded.hypnogram, hypnogram_interval=excluded.hypnogram_interval, "
+            "movement=excluded.movement, raw=excluded.raw",
             rows,
         )
     return len(rows)
@@ -283,8 +286,8 @@ def upsert_sleep_periods(
 
 def list_sleep_periods(start: str | None = None, end: str | None = None
                        ) -> list[dict[str, Any]]:
-    sql = ("SELECT id, day, type, bedtime_start, bedtime_end, hypnogram, movement "
-           "FROM sleep_periods WHERE 1=1")
+    sql = ("SELECT id, day, type, bedtime_start, bedtime_end, hypnogram, "
+           "hypnogram_interval, movement FROM sleep_periods WHERE 1=1")
     params: list[Any] = []
     if start:
         sql += " AND day >= ?"

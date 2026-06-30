@@ -139,8 +139,13 @@ def get_coverage() -> dict[str, Any]:
 
 @app.post("/api/backfill")
 def backfill() -> dict[str, Any]:
-    """Parse granular series out of already-stored raw documents (no API)."""
-    return granular.backfill_from_documents()
+    """Start parsing granular series out of stored docs (background, no API)."""
+    return granular.start_backfill_async()
+
+
+@app.get("/api/backfill/status")
+def backfill_status() -> dict[str, Any]:
+    return granular.backfill_status()
 
 
 @app.get("/api/intraday/catalog")

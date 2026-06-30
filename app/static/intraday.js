@@ -12,7 +12,41 @@ const iv = {
   selected: null,
   chart: null,
   loaded: false,
+  backfillTried: false,
 };
+
+// Parse granular series out of already-synced documents (background job).
+function ensureBackfill() {
+  iv.backfillTried = true;
+  document.getElementById("night-list").innerHTML =
+    `<div class="muted small" style="padding:8px">Parsing your sleep history…</div>`;
+  runBackfill();
+}
+
+async function runBackfill() {
+  const list = document.getElementById("night-list");
+  const btn = document.getElementById("backfill-btn");
+  btn.disabled = true;
+  try {
+    await api("/api/backfill", { method: "POST" });
+  } catch (e) { toast("Backfill failed: " + e.message, 4000); btn.disabled = false; return; }
+  const tick = async () => {
+    let s;
+    try { s = await api("/api/backfill/status"); } catch { setTimeout(tick, 1500); return; }
+    if (s.running) {
+      list.innerHTML = `<div class="muted small" style="padding:8px">Parsing your sleep ` +
+        `history into high-resolution series… runs once (~15s per 90 days).</div>`;
+      setTimeout(tick, 1500);
+    } else {
+      btn.disabled = false;
+      if (s.error) { toast("Backfill error: " + s.error, 5000); return; }
+      const np = (s.result && s.result.sleep && s.result.sleep.periods) || 0;
+      toast(`Granular data ready: ${np} nights parsed.`);
+      loadNights();
+    }
+  };
+  tick();
+}
 
 function tsToUnix(ts) { return Date.parse(ts) / 1000; }
 
@@ -43,8 +77,10 @@ async function loadNights() {
   const list = document.getElementById("night-list");
   list.innerHTML = "";
   if (!iv.nights.length) {
-    list.innerHTML = `<div class="muted small" style="padding:8px">No sleep periods yet. ` +
-      `Click <b>Backfill granular</b> (or Sync) to populate.</div>`;
+    // First visit: parse granular series out of already-synced data, once.
+    if (!iv.backfillTried) { ensureBackfill(); return; }
+    list.innerHTML = `<div class="muted small" style="padding:8px">No sleep periods ` +
+      `found. Run <b>Sync</b> first, then <b>Backfill granular</b>.</div>`;
     return;
   }
   for (const p of iv.nights) {
@@ -165,9 +201,11 @@ function renderNightStats(p, samples) {
   const wrap = document.getElementById("night-stats");
   const hr = (samples.sleep_hr || []).map((s) => s.value);
   const hrv = (samples.sleep_hrv || []).map((s) => s.value);
-  // stage minutes from hypnogram (5 min per char)
+  // stage minutes from hypnogram, honouring its resolution (30-sec or 5-min)
+  const minPerChar = (p.hypnogram_interval || 300) / 60;
   const stageMin = { 1: 0, 2: 0, 3: 0, 4: 0 };
-  for (const ch of (p.hypnogram || "")) { const v = parseInt(ch, 10); if (v in stageMin) stageMin[v] += 5; }
+  for (const ch of (p.hypnogram || "")) { const v = parseInt(ch, 10); if (v in stageMin) stageMin[v] += minPerChar; }
+  for (const k in stageMin) stageMin[k] = Math.round(stageMin[k]);
   const card = (label, val, dot) =>
     `<div class="stat"><div class="label">${dot ? `<span class="dot" style="background:${dot}"></span>` : ""}${label}</div>` +
     `<div class="big">${val}</div></div>`;
@@ -192,15 +230,8 @@ function renderNightStats(p, samples) {
       document.querySelectorAll("#intraday-ranges .chip").forEach((x) => x.classList.remove("active"));
       c.classList.add("active"); iv.range = c.dataset.range; loadNights();
     }));
-  document.getElementById("backfill-btn").addEventListener("click", async (e) => {
-    const btn = e.target; btn.disabled = true; btn.textContent = "Backfilling…";
-    try {
-      const r = await api("/api/backfill", { method: "POST" });
-      const periods = (r.sleep && r.sleep.periods) || 0;
-      toast(`Backfill done: ${periods} sleep periods, ${(r.sleep && r.sleep.samples) || 0} samples.`);
-      loadNights();
-    } catch (err) { toast("Backfill failed: " + err.message, 4000); }
-    finally { btn.disabled = false; btn.textContent = "Backfill granular"; }
+  document.getElementById("backfill-btn").addEventListener("click", () => {
+    iv.backfillTried = true; runBackfill();
   });
   let rt;
   window.addEventListener("resize", () => {

@@ -17,6 +17,8 @@ Oura encodes sub-daily data two ways:
 from __future__ import annotations
 
 import json
+import threading
+import time
 from datetime import datetime, timedelta
 from typing import Any, Iterable
 
@@ -110,20 +112,29 @@ def parse_digit_string(seq: str | None, interval_sec: int, start: datetime | Non
 # --- per-collection extraction ----------------------------------------------
 
 def _sleep_rows(doc: dict[str, Any]):
-    """Return (period_row, sample_rows) for one sleep document/period."""
+    """Return (period_row, sample_rows) for one sleep document/period.
+
+    Prefers the 30-second hypnogram (``sleep_phase_30_sec``, present in real
+    responses though absent from Oura's published OpenAPI spec) over the 5-minute
+    one — 10x finer sleep staging.
+    """
     period_id = doc.get("id") or f"sleep:{doc.get('day')}:{doc.get('bedtime_start')}"
     start = _parse_dt(doc.get("bedtime_start"))
+    hyp30 = doc.get("sleep_phase_30_sec")
+    if hyp30:
+        hyp, hyp_interval = hyp30, 30
+    else:
+        hyp, hyp_interval = doc.get("sleep_phase_5_min"), 300
     period_row = (
         period_id, doc.get("day"), doc.get("type"),
         doc.get("bedtime_start"), doc.get("bedtime_end"),
-        doc.get("sleep_phase_5_min"), doc.get("movement_30_sec"),
+        hyp, hyp_interval, doc.get("movement_30_sec"),
         json.dumps(doc),
     )
     sample_rows: list[tuple[str, str, float, str | None]] = []
     sample_rows += parse_sample_model(doc.get("heart_rate"), "sleep_hr", period_id)
     sample_rows += parse_sample_model(doc.get("hrv"), "sleep_hrv", period_id)
-    sample_rows += parse_digit_string(
-        doc.get("sleep_phase_5_min"), 300, start, "sleep_stage", period_id)
+    sample_rows += parse_digit_string(hyp, hyp_interval, start, "sleep_stage", period_id)
     sample_rows += parse_digit_string(
         doc.get("movement_30_sec"), 30, start, "sleep_movement", period_id)
     return period_row, sample_rows
@@ -236,3 +247,36 @@ def backfill_from_documents() -> dict[str, Any]:
     result["sessions"] = store_sessions(session_docs)
 
     return result
+
+
+# --- background runner (backfill is slow for large histories) ----------------
+
+_state: dict[str, Any] = {"running": False, "result": None, "error": None,
+                          "started_at": None, "finished_at": None}
+_state_lock = threading.Lock()
+
+
+def backfill_status() -> dict[str, Any]:
+    with _state_lock:
+        return dict(_state)
+
+
+def start_backfill_async() -> dict[str, Any]:
+    """Kick off backfill in a daemon thread; returns immediately."""
+    with _state_lock:
+        if _state["running"]:
+            return {"started": False, "running": True}
+        _state.update(running=True, error=None, result=None,
+                      started_at=time.time(), finished_at=None)
+
+    def _run() -> None:
+        try:
+            res = backfill_from_documents()
+            with _state_lock:
+                _state.update(running=False, result=res, finished_at=time.time())
+        except Exception as exc:  # noqa: BLE001
+            with _state_lock:
+                _state.update(running=False, error=str(exc), finished_at=time.time())
+
+    threading.Thread(target=_run, daemon=True, name="granular-backfill").start()
+    return {"started": True, "running": True}

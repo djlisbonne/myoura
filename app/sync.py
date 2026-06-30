@@ -105,11 +105,15 @@ async def run_sync(start: str | None = None, end: str | None = None,
             written = db.upsert_daily(daily_rows)
             db.upsert_documents(doc_rows)
 
-            # Sub-daily extraction for the collections that carry it.
-            if collection == "sleep":
-                granular.store_sleep_docs(docs)
-            elif collection == "daily_activity":
-                granular.store_activity_docs(docs)
+            # Sub-daily extraction for the collections that carry it. Never let
+            # a parsing hiccup abort the whole sync.
+            try:
+                if collection == "sleep":
+                    granular.store_sleep_docs(docs)
+                elif collection == "daily_activity":
+                    granular.store_activity_docs(docs)
+            except Exception as exc:  # noqa: BLE001
+                summary["errors"][f"{collection}_granular"] = str(exc)
 
             summary["collections"][collection] = {
                 "documents": len(docs), "metric_rows": written,
